@@ -5,8 +5,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from api.routes import router
 
 app = FastAPI(
-    title="Anchor API",
-    description="Backend API for the Anchor Dementia Companion App (NVIDIA GB10 Local)",
+    title="Belong API",
+    description="Backend API for the Belong Dementia Companion App (NVIDIA GB10 Local)",
     version="1.0.0"
 )
 
@@ -48,7 +48,7 @@ app.include_router(router)
 
 @app.get("/")
 async def root():
-    return {"status": "ok", "message": "Anchor API is running fully on-device"}
+    return {"status": "ok", "message": "Belong API is running fully on-device"}
 
 if __name__ == "__main__":
     import uvicorn

@@ -1,5 +1,5 @@
 """
-On-device speech for Anchor — fully offline.
+On-device speech for Belong — fully offline.
 
   STT: faster-whisper (CTranslate2)  — patient speech -> text
   TTS: Piper (ONNX)                  — companion text  -> warm audio

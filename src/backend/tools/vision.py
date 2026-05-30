@@ -1,5 +1,5 @@
 """
-On-device face recognition for Anchor.
+On-device face recognition for Belong.
 
 Uses InsightFace (buffalo_l: RetinaFace detector + ArcFace recognition) to turn
 a photo into a 512-d normalized face embedding. Everything runs locally on the

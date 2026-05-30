@@ -23,7 +23,9 @@ SUBS_FILE = os.path.join(_DATA, "subscriptions.json")
 VAPID_PRIVATE = os.path.join(_BASE, "keys", "vapid_private.pem")
 with open(os.path.join(_BASE, "keys", "vapid_public.txt")) as _f:
     VAPID_PUBLIC = _f.read().strip()
-VAPID_CLAIMS_SUB = os.getenv("VAPID_SUB", "mailto:admin@anchor.local")
+# VAPID "sub" must be a real-looking mailto/https the push service could use to
+# contact the sender. Some services (Apple) reject placeholder/.local domains.
+VAPID_CLAIMS_SUB = os.getenv("VAPID_SUB", "mailto:jeremyk@xanu.com")
 
 _lock = threading.Lock()
 _fired = set()  # keys of (event_id:date:time) already pushed, avoids duplicates
@@ -88,6 +90,12 @@ def _remove_subscription(endpoint: str):
 def send_push(payload: dict) -> int:
     """Send a payload to every subscribed patient browser. Returns count sent."""
     from pywebpush import webpush, WebPushException
+
+    # Guard: if the key file is missing, pywebpush would treat the path string
+    # as the key and fail with a confusing "Could not deserialize" error.
+    if not os.path.isfile(VAPID_PRIVATE):
+        print(f"VAPID private key missing at {VAPID_PRIVATE} — cannot send push.")
+        return 0
 
     sent = 0
     for sub in list_subscriptions():

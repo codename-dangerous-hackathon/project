@@ -22,7 +22,7 @@ start:
 	@echo "Starting Frontend (Next.js)..."
 	@cd src/frontend && nohup npm start > ../../frontend.log 2>&1 & echo $$! > frontend.pid
 	@echo "========================================="
-	@echo "✅ Anchor is running in the background!"
+	@echo "✅ Belong is running in the background!"
 	@echo "Frontend: http://localhost:3000"
 	@echo "Backend : http://127.0.0.1:8001"
 	@echo "To view logs, run: make logs"
@@ -35,7 +35,7 @@ stop:
 	@-if [ -f backend.pid ]; then kill `cat backend.pid` 2>/dev/null || true; rm -f backend.pid; fi
 	@echo "Stopping Frontend..."
 	@-if [ -f frontend.pid ]; then kill `cat frontend.pid` 2>/dev/null || true; rm -f frontend.pid; fi
-	@echo "🛑 Anchor has been stopped."
+	@echo "🛑 Belong has been stopped."
 
 # Tail the logs for both services
 logs:

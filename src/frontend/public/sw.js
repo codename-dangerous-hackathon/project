@@ -1,13 +1,13 @@
-// Anchor service worker.
+// Belong service worker.
 // Goal: stay installable/offline-capable WITHOUT ever pinning stale app code.
 // Bump CACHE_NAME on any change here to force a clean re-cache.
-const CACHE_NAME = 'anchor-v3';
+const CACHE_NAME = 'belong-v1';
 
 // --- Web Push: medication / appointment / family reminders ---
 self.addEventListener('push', (event) => {
   let data = {};
   try { data = event.data ? event.data.json() : {}; } catch { /* noop */ }
-  const title = data.title || 'Anchor reminder';
+  const title = data.title || 'Belong reminder';
   event.waitUntil((async () => {
     await self.registration.showNotification(title, {
       body: data.body || '',

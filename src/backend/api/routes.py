@@ -244,7 +244,7 @@ async def push_subscribe(subscription: dict):
 async def push_test():
     """Fire a test push to all subscribed devices (to verify notifications)."""
     sent = reminders.send_push({
-        "title": "🔔 Anchor reminder test",
+        "title": "🔔 Belong reminder test",
         "body": "Great — reminders are working!",
         "type": "test",
         "event_id": "test",

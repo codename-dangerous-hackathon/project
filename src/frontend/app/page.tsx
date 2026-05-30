@@ -3,7 +3,7 @@ import Link from "next/link";
 export default function Home() {
   return (
     <div className="flex flex-col items-center justify-center min-h-screen p-8 text-center sm:p-20 font-[family-name:var(--font-geist-sans)] dark:bg-black">
-      <h1 className="text-4xl font-bold mb-4 dark:text-zinc-50">Anchor</h1>
+      <h1 className="text-4xl font-bold mb-4 dark:text-zinc-50">Belong</h1>
       <p className="text-xl text-gray-600 dark:text-gray-300 mb-12">100% On-Device AI Companion</p>
       
       <div className="flex flex-col sm:flex-row gap-6">

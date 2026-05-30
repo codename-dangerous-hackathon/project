@@ -21,13 +21,13 @@ export const viewport: Viewport = {
 };
 
 export const metadata: Metadata = {
-  title: "Anchor | On-device AI Companion",
+  title: "Belong | On-device AI Companion",
   description: "A 100% on-device AI companion for dementia care. Powered by NVIDIA GB10.",
   manifest: "/manifest.webmanifest",
   appleWebApp: {
     capable: true,
     statusBarStyle: "black-translucent",
-    title: "Anchor",
+    title: "Belong",
   },
   formatDetection: {
     telephone: false,

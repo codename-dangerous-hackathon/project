@@ -5,7 +5,7 @@ const FACE_A = "e2e/fixtures/faceA.jpg";
 const FACE_B = "e2e/fixtures/faceB.jpg";
 const b64 = (p: string) => fs.readFileSync(p).toString("base64");
 
-// End-to-end tests for Anchor, exercising the real production build + FastAPI
+// End-to-end tests for Belong, exercising the real production build + FastAPI
 // backend. Feature intent comes from docs/architecture_features.md and
 // docs/claude-output.md (P0: "Who is this?", Daily Briefing, Memory Journal).
 
@@ -14,7 +14,7 @@ const SHOTS = "e2e/screenshots";
 test.describe("Landing page", () => {
   test("renders title and navigates to both surfaces", async ({ page }) => {
     await page.goto("/");
-    await expect(page.getByRole("heading", { name: "Anchor" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Belong" })).toBeVisible();
     await expect(
       page.getByText("100% On-Device AI Companion")
     ).toBeVisible();
