@@ -1,3 +1,10 @@
+# Local API & Backend
+fastapi
+uvicorn
+pydantic
+chromadb
+python-multipart
+
 # Data Science & RAPIDS (Install via Conda if possible for GPU support)
 pandas
 numpy

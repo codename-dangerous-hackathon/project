@@ -1,9 +1,24 @@
-.PHONY: start stop logs clean
+.PHONY: install build start stop logs clean
+
+# Install all dependencies for both backend and frontend
+install:
+	@echo "Installing Backend dependencies (Virtual Environment)..."
+	@python3 -m venv venv
+	@./venv/bin/pip install -Ur requirements.txt
+	@echo "Installing Frontend dependencies (npm)..."
+	@cd src/frontend && npm install
+	@echo "✅ All dependencies installed locally."
+
+# Build the frontend (Next.js production build)
+build:
+	@echo "Building Frontend (Next.js)..."
+	@cd src/frontend && npm run build
+	@echo "✅ Frontend built successfully."
 
 # Start both the backend and frontend in the background
 start:
 	@echo "Starting Backend (FastAPI)..."
-	@cd src/backend && nohup uvicorn main:app --host 127.0.0.1 --port 8000 --reload > ../../backend.log 2>&1 & echo $$! > backend.pid
+	@cd src/backend && nohup ../../venv/bin/uvicorn main:app --host 127.0.0.1 --port 8000 --reload > ../../backend.log 2>&1 & echo $$! > backend.pid
 	@echo "Starting Frontend (Next.js)..."
 	@cd src/frontend && nohup npm run dev > ../../frontend.log 2>&1 & echo $$! > frontend.pid
 	@echo "========================================="
