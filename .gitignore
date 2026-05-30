@@ -23,4 +23,12 @@ data/*
 
 # NVIDIA/Logs
 *.log
+*.pid
 nemo_experiments/
+
+# Next.js / Frontend
+src/frontend/.next/
+src/frontend/node_modules/
+
+# Local Databases (SQLite / ChromaDB)
+src/backend/database/data/
