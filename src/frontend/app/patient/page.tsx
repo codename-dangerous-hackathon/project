@@ -139,7 +139,7 @@ export default function PatientPage() {
   };
 
   return (
-    <main className="flex flex-col items-center justify-center min-h-[100dvh] bg-black text-white p-4 font-sans select-none relative">
+    <main className="flex flex-col items-center justify-center w-full min-h-[100dvh] bg-black text-white p-4 font-sans select-none relative">
       
       {/* Subtle Home Button in Top Left */}
       <Link href="/" className="absolute top-6 left-6 p-3 text-zinc-600 hover:text-zinc-300 transition-colors bg-zinc-900/50 hover:bg-zinc-800 rounded-full" title="Back to Home">
