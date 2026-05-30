@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <!-- Background circle -->
+  <circle cx="256" cy="256" r="240" fill="#FDF3EE"/>
+  <circle cx="256" cy="256" r="240" fill="none" stroke="#F4D9CA" stroke-width="3"/>
+
+  <!-- Figure left – coral -->
+  <circle cx="166" cy="200" r="37" fill="#E8715A"/>
+  <path d="M112 318 Q134 252 166 240 Q198 252 220 318 Q198 342 166 346 Q134 342 112 318Z" fill="#E8715A"/>
+
+  <!-- Figure right – teal -->
+  <circle cx="346" cy="200" r="37" fill="#4AACAA"/>
+  <path d="M292 318 Q314 252 346 240 Q378 252 400 318 Q378 342 346 346 Q314 342 292 318Z" fill="#4AACAA"/>
+
+  <!-- Figure centre – amber (slightly larger/forward) -->
+  <circle cx="256" cy="186" r="42" fill="#F0A04B"/>
+  <path d="M200 316 Q224 244 256 232 Q288 244 312 316 Q288 344 256 348 Q224 344 200 316Z" fill="#F0A04B"/>
+
+  <!-- Connecting arc -->
+  <path d="M128 336 Q192 368 256 372 Q320 368 384 336" fill="none" stroke="#E8715A" stroke-width="4" stroke-linecap="round" opacity="0.45"/>
+
+  <!-- App name -->
+  <text x="256" y="446" font-family="Georgia, serif" font-size="54" font-weight="400" fill="#C05A40" text-anchor="middle" letter-spacing="4">belong</text>
+</svg>
