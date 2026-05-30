@@ -11,7 +11,7 @@ export default function CaregiverPage() {
     e.preventDefault();
     setEnrollStatus("Saving to Vector DB...");
     try {
-      const res = await fetch("http://localhost:8000/enroll_memory", {
+      const res = await fetch("/api/enroll_memory", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ text: memoryText, tags: "life-story" })

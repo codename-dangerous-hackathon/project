@@ -24,7 +24,7 @@ export default function PatientPage() {
       
       try {
         // Here we'd normally pass the transcribed text
-        const response = await fetch("http://localhost:8000/ask", {
+        const response = await fetch("/api/ask", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ user_input: "When is my daughter coming?" })
@@ -34,7 +34,7 @@ export default function PatientPage() {
         setSubtitle(data.reply || "I am always here for you.");
         
         // Fetch audio for the reply
-        const audioRes = await fetch("http://localhost:8000/synthesize", {
+        const audioRes = await fetch("/api/synthesize", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ user_input: data.reply || "Hello" })
@@ -105,7 +105,7 @@ export default function PatientPage() {
     setSubtitle("Looking...");
     
     try {
-      const res = await fetch("http://localhost:8000/identify", {
+      const res = await fetch("/api/identify", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ image_base64: base64Image })
@@ -120,7 +120,7 @@ export default function PatientPage() {
       stopCamera();
       
       // Auto-play TTS for the face identification
-      const audioRes = await fetch("http://localhost:8000/synthesize", {
+      const audioRes = await fetch("/api/synthesize", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ user_input: reply })
