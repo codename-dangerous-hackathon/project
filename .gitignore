@@ -32,3 +32,9 @@ src/frontend/node_modules/
 
 # Local Databases (SQLite / ChromaDB)
 src/backend/database/data/
+
+# Local runtime data (calendar events, push subscriptions) — kept on disk, never tracked
+src/backend/data/
+
+# Secrets — VAPID private key for Web Push (keep on disk, never commit)
+src/backend/keys/vapid_private.pem
