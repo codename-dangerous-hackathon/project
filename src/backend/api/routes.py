@@ -1,4 +1,4 @@
-from fastapi import APIRouter, HTTPException, UploadFile, File
+from fastapi import APIRouter, HTTPException, UploadFile, File, Query
 from fastapi.responses import Response
 from pydantic import BaseModel
 from typing import List, Optional
@@ -8,6 +8,9 @@ from tools.audio import transcribe_audio_local, synthesize_speech_local
 from tools.vision import extract_face_embedding_from_base64
 from services import reminders
 from services import eventbrite
+from services import places as memory_places
+from services import profile
+from services import places as memory_places
 from services import profile
 import uuid
 
@@ -64,6 +67,11 @@ class PersonMemoryRequest(BaseModel):
 
 class PersonPhotoRequest(BaseModel):
     image_base64: str
+
+class PlaceRequest(BaseModel):
+    label: str
+    address: str
+    note: str
 
 @router.post("/ask")
 async def ask_endpoint(request: AskRequest):
@@ -372,6 +380,54 @@ async def get_daily_briefing():
         
     return {"briefing": f"Good morning. Here is what we have: {routine_hint}."}
 
+
+@router.get("/places")
+async def list_memory_places():
+    """Saved memory-journal locations for the caregiver UI and map."""
+    return {"places": memory_places.list_places()}
+
+
+@router.post("/places")
+async def create_memory_place(request: PlaceRequest):
+    """Geocode an address, check Street View availability, and store the place."""
+    if not request.label.strip():
+        raise HTTPException(status_code=400, detail="Label is required.")
+    if not request.address.strip():
+        raise HTTPException(status_code=400, detail="Address is required.")
+    try:
+        place = memory_places.add_place(request.label, request.address, request.note)
+        return place
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.delete("/places/{place_id}")
+async def delete_memory_place(place_id: str):
+    if not memory_places.delete_place(place_id):
+        raise HTTPException(status_code=404, detail="Place not found.")
+    return {"status": "deleted", "id": place_id}
+
+
+@router.get("/streetview")
+async def streetview_proxy(
+    lat: float = Query(...),
+    lng: float = Query(...),
+    size: str = Query("600x400"),
+):
+    """Proxy Street View images so the Google API key stays on the server."""
+    try:
+        if not memory_places.streetview_available(lat, lng):
+            raise HTTPException(status_code=404, detail="No Street View imagery at this location.")
+        data = memory_places.fetch_streetview_bytes(lat, lng, size=size)
+        return Response(content=data, media_type="image/jpeg")
+    except HTTPException:
+        raise
+    except ValueError as e:
+        raise HTTPException(status_code=503, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.get("/events")

@@ -1,7 +1,9 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { Suspense, useState, useEffect, useCallback } from "react";
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
+import MemoryJournalTab from "./MemoryJournalTab";
 
 type Mem = { id: string; text: string };
 type Person = {
@@ -150,8 +152,25 @@ function CalendarMonth({
   );
 }
 
-export default function CaregiverPage() {
-  const [activeTab, setActiveTab] = useState<"dashboard" | "family" | "notes" | "calendar">("dashboard");
+type CaregiverTab = "dashboard" | "family" | "notes" | "calendar" | "journal";
+
+function CaregiverPageInner() {
+  const searchParams = useSearchParams();
+  const tabParam = searchParams.get("tab");
+  const initialTab: CaregiverTab =
+    tabParam === "journal" ? "journal"
+    : tabParam === "family" ? "family"
+    : tabParam === "calendar" ? "calendar"
+    : tabParam === "notes" ? "notes"
+    : "dashboard";
+  const [activeTab, setActiveTab] = useState<CaregiverTab>(initialTab);
+
+  useEffect(() => {
+    if (tabParam === "journal") setActiveTab("journal");
+    else if (tabParam === "family") setActiveTab("family");
+    else if (tabParam === "calendar") setActiveTab("calendar");
+    else if (tabParam === "notes") setActiveTab("notes");
+  }, [tabParam]);
 
   // Family members
   const [people, setPeople] = useState<Person[]>([]);
@@ -460,6 +479,7 @@ export default function CaregiverPage() {
           {([
             ["dashboard", "📊 Daily Dashboard"],
             ["family", "👪 Family Members"],
+            ["journal", "📍 Memory Journal"],
             ["calendar", "🗓️ Calendar"],
             ["notes", "📖 Patient Notes"],
           ] as const).map(([key, label]) => (
@@ -500,6 +520,9 @@ export default function CaregiverPage() {
               </div>
             </div>
           )}
+
+          {/* MEMORY JOURNAL */}
+          {activeTab === "journal" && <MemoryJournalTab />}
 
           {/* FAMILY MEMBERS */}
           {activeTab === "family" && (
@@ -871,5 +894,13 @@ export default function CaregiverPage() {
         </section>
       </div>
     </main>
+  );
+}
+
+export default function CaregiverPage() {
+  return (
+    <Suspense fallback={<main className="min-h-screen bg-zinc-50 flex items-center justify-center text-zinc-500">Loading…</main>}>
+      <CaregiverPageInner />
+    </Suspense>
   );
 }

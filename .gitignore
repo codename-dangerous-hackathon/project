@@ -38,3 +38,5 @@ src/backend/data/
 
 # Secrets — VAPID private key for Web Push (keep on disk, never commit)
 src/backend/keys/vapid_private.pem
+src/backend/.env
+
