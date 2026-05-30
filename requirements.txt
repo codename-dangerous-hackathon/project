@@ -1,0 +1,23 @@
+# Data Science & RAPIDS (Install via Conda if possible for GPU support)
+pandas
+numpy
+matplotlib
+seaborn
+scikit-learn
+
+# NLP & NVIDIA Ecosystem
+transformers
+torch
+nemo-toolkit[all]
+openai  # For NIMs (often OpenAI-compatible API)
+
+# LLM Frameworks (RAG)
+langchain
+langchain-nvidia-ai-endpoints
+llama-index
+
+# Utils
+requests
+python-dotenv
+tqdm
+jupyterlab

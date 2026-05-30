@@ -1,0 +1,26 @@
+# Environments
+.venv
+env/
+venv/
+ENV/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Data
+data/*
+!data/.gitkeep
+
+# Jupyter
+.ipynb_checkpoints
+
+# IDEs
+.vscode/
+.idea/
+
+# NVIDIA/Logs
+*.log
+nemo_experiments/
