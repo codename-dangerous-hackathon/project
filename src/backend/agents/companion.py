@@ -6,16 +6,38 @@ from database.chroma_manager import vdb
 import requests
 
 NIM_BASE_URL = os.getenv("NIM_BASE_URL", "http://localhost:8000/v1")
-COMPANION_MODEL = "nemotron-mini-4b-instruct"
+
+# The served model id must match exactly what the NIM/vLLM endpoint advertises,
+# otherwise the request 404s and we fall back to a canned line. Prefer an env
+# override, else auto-detect the first model the endpoint is serving.
+_MODEL_OVERRIDE = os.getenv("NIM_MODEL")
+_cached_model = None
+
+
+def get_companion_model() -> str:
+    global _cached_model
+    if _MODEL_OVERRIDE:
+        return _MODEL_OVERRIDE
+    if _cached_model:
+        return _cached_model
+    try:
+        resp = requests.get(f"{NIM_BASE_URL}/models", timeout=5)
+        resp.raise_for_status()
+        _cached_model = resp.json()["data"][0]["id"]
+    except Exception as e:
+        print(f"NIM model auto-detect failed: {e}")
+        _cached_model = "nemotron"  # harmless placeholder; call will fall back
+    return _cached_model
 
 # The Errorless & Validation Therapy System Prompt
-SYSTEM_PROMPT = """You are a warm, reassuring companion for someone who experiences memory loss. 
+SYSTEM_PROMPT = """You are a warm, reassuring companion for someone who experiences memory loss.
 RULES (STRICT):
 1. ERRORLESS: Never tell the user they are wrong.
 2. NEVER QUIZ: Never say "Do you remember?" or "Don't you remember?".
-3. VALIDATION: If the user looks for someone who is not there, validate their feeling warmly. 
+3. VALIDATION: If the user looks for someone who is not there, validate their feeling warmly.
 4. CONTEXTUAL: Use the provided memory facts to ground your response, but do it naturally like a friend chatting.
 5. SHORT: Keep your answers very short (1-3 sentences) so they can be spoken clearly by TTS.
+6. NEVER INVENT: Only state names, relationships, jobs, places, or facts that appear in the context below. If the information isn't there, do NOT make up a name or detail — gently say you're not certain while staying warm (e.g. "I'm not quite sure about that, but I'm right here with you."). Never guess who someone is.
 """
 
 def fetch_revelant_memories(user_query: str) -> str:
@@ -26,36 +48,71 @@ def fetch_revelant_memories(user_query: str) -> str:
         memories = " ".join(results['documents'][0])
     return memories
 
-def ask_companion(user_input: str) -> str:
+def build_family_context() -> str:
+    """A roster of the enrolled family members and the facts about each one,
+    so the companion actually knows who 'my sister/brother/daughter' is."""
+    lines = []
+    for p in vdb.list_people():
+        facts = " ".join(f["text"] for f in vdb.list_memories_for_person(p["id"]))
+        line = f"- {p['name']} is the patient's {p['relationship']}."
+        if facts:
+            line += f" {facts}"
+        lines.append(line)
+    return "\n".join(lines)
+
+def ask_companion(user_input: str, history=None) -> str:
     """
     Main entry point for the infinite-patience conversational loop.
-    Fetches RAG context, constructs the prompt, and hits the local NIM.
+    Fetches RAG context, includes prior turns for a real discussion, and hits
+    the local NIM.
+
+    history: optional list of {"role": "user"|"assistant", "content": str} from
+    earlier in this conversation, so the companion can actually follow along.
     """
-    # 1. Get context from ChromaDB
+    # 1. Build grounding context: the known family roster + relevant memories.
+    family = build_family_context()
     rag_context = fetch_revelant_memories(user_input)
-    
+    parts = []
+    if family:
+        parts.append("KNOWN FAMILY MEMBERS (the only people you may name):\n" + family)
+    if rag_context:
+        parts.append("OTHER NOTES ABOUT THE PATIENT: " + rag_context)
+    context_injection = ("\n\n" + "\n\n".join(parts) + "\n") if parts else ""
+
     # 2. Build the enhanced prompt
-    context_injection = f"Here is some background context about the user's life: {rag_context}\n\n" if rag_context else ""
-    messages = [
-        {"role": "system", "content": SYSTEM_PROMPT + context_injection},
-        {"role": "user", "content": user_input}
-    ]
+    messages = [{"role": "system", "content": SYSTEM_PROMPT + context_injection}]
+
+    # Prior turns (kept short — only the recent ones matter for a TTS chat)
+    if history:
+        for turn in history[-8:]:
+            role = turn.get("role")
+            content = turn.get("content")
+            if role in ("user", "assistant") and content:
+                messages.append({"role": role, "content": content})
+
+    messages.append({"role": "user", "content": user_input})
 
     try:
         # 3. Call the Local NIM Model
         response = requests.post(
             f"{NIM_BASE_URL}/chat/completions",
             json={
-                "model": COMPANION_MODEL,
+                "model": get_companion_model(),
                 "messages": messages,
-                "max_tokens": 150,
-                "temperature": 0.3
+                "max_tokens": 200,
+                "temperature": 0.3,
+                # Nemotron Nano is a reasoning model; turn thinking OFF so it
+                # answers directly (warm, fast) instead of spending the token
+                # budget on a hidden chain-of-thought.
+                "chat_template_kwargs": {"enable_thinking": False},
             },
-            timeout=5
+            timeout=60,
         )
         response.raise_for_status()
-        reply = response.json()
-        return reply["choices"][0]["message"]["content"]
+        content = (response.json()["choices"][0]["message"].get("content") or "").strip()
+        if not content:
+            raise ValueError("empty content from model")
+        return content
     except Exception as e:
         # Fallback mechanism if the model is unreachable during development
         print(f"NIM Error: {e}")

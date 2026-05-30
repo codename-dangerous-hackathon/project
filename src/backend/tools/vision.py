@@ -35,6 +35,11 @@ def _get_app():
     return _app
 
 
+def warmup() -> None:
+    """Pre-load the face model so the first enroll/identify isn't slow."""
+    _get_app()
+
+
 def _decode_image(image_bytes: bytes):
     arr = np.frombuffer(image_bytes, dtype=np.uint8)
     return cv2.imdecode(arr, cv2.IMREAD_COLOR)  # BGR, or None if not an image

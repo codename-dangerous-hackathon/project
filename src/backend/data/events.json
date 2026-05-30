@@ -1,0 +1,20 @@
+[
+  {
+    "type": "medication",
+    "title": "Leeeooo wake upp",
+    "notes": "Take 1 pills",
+    "time": "16:15",
+    "date": "",
+    "recurrence": "daily",
+    "id": "6c58d00f-6d88-4c88-956a-08471cb1a4c6"
+  },
+  {
+    "type": "medication",
+    "title": "Test",
+    "notes": "Hello",
+    "time": "13:15",
+    "date": "",
+    "recurrence": "daily",
+    "id": "789953c9-1bd8-4a3b-95e0-4bceb55dc6ba"
+  }
+]

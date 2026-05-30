@@ -32,31 +32,55 @@ test.describe("Landing page", () => {
 });
 
 test.describe("Patient — Infinite Patience loop (Feature 1)", () => {
-  test("TALK button asks the Companion and renders a warm reply", async ({
+  const FALLBACK = "I hear you, my friend. Let's take a look at the garden together.";
+
+  test("full voice loop: record → transcribe → real reply → speak", async ({
     page,
   }) => {
     await page.goto("/patient");
     const h1 = page.locator("h1");
     await expect(h1).toHaveText("I am here to help you.");
 
+    // Tap to start listening (records the fake mic, which is fed our speech wav).
+    await page.getByRole("button", { name: "TALK" }).click();
+    await expect(page.getByRole("button", { name: "TAP TO STOP" })).toBeVisible();
+    await expect(h1).toContainText("listening");
+
+    // Let the spoken sentence ("Tell me about my daughter Sarah") play in.
+    await page.waitForTimeout(3500);
+
+    const sttResp = page.waitForResponse(
+      (r) =>
+        new URL(r.url()).pathname === "/api/transcribe" &&
+        r.request().method() === "POST",
+      { timeout: 30_000 }
+    );
     const askResp = page.waitForResponse(
-      (r) => r.url().includes("/api/ask") && r.request().method() === "POST"
+      (r) =>
+        new URL(r.url()).pathname === "/api/ask" &&
+        r.request().method() === "POST",
+      { timeout: 30_000 }
     );
 
-    await page.getByRole("button", { name: "TALK" }).click();
-    // Immediate feedback proves the client hydrated (the original prod bug).
-    await expect(h1).toHaveText("Listening...");
-    await expect(page.getByRole("button", { name: "LISTENING" })).toBeVisible();
+    // Tap to stop → triggers transcribe → ask → speak.
+    await page.getByRole("button", { name: "TAP TO STOP" }).click();
 
-    const resp = await askResp;
-    expect(resp.status()).toBe(200);
-    const body = await resp.json();
-    expect(typeof body.reply).toBe("string");
-    expect(body.reply.length).toBeGreaterThan(0);
+    // Real STT actually heard the words.
+    const stt = await sttResp;
+    expect(stt.status()).toBe(200);
+    expect((await stt.json()).text.toLowerCase()).toContain("sarah");
 
-    // The companion reply is rendered as the subtitle.
-    await expect(h1).toHaveText(body.reply);
-    await page.screenshot({ path: `${SHOTS}/02-patient-reply.png`, fullPage: true });
+    // Real Nemotron reply (not the offline fallback line).
+    const ask = await askResp;
+    expect(ask.status()).toBe(200);
+    const reply = (await ask.json()).reply as string;
+    expect(reply.length).toBeGreaterThan(0);
+    expect(reply).not.toBe(FALLBACK);
+
+    // UI echoes what was heard and speaks the reply.
+    await expect(page.getByText(/You said:/)).toBeVisible();
+    await expect(h1).toHaveText(reply, { timeout: 20_000 });
+    await page.screenshot({ path: `${SHOTS}/02-patient-voice.png`, fullPage: true });
   });
 });
 
@@ -91,8 +115,9 @@ test.describe('Patient — "Who is this?" face recognition (Feature 2)', () => {
     expect(resp.status()).toBe(200);
     expect((await resp.json()).match).toBe(false);
 
+    // Fake camera has no real face, so we get a graceful no-match message.
     await expect(page.locator("h1")).toHaveText(
-      "I don't recognize this person yet.",
+      /don't recognize this person yet|can't see a face clearly/,
       { timeout: 15_000 }
     );
     await page.screenshot({ path: `${SHOTS}/04-patient-identified.png`, fullPage: true });
@@ -100,135 +125,167 @@ test.describe('Patient — "Who is this?" face recognition (Feature 2)', () => {
 });
 
 test.describe("Caregiver — portal", () => {
-  test("tabs switch between Dashboard, Faces and Life Story", async ({ page }) => {
+  test("tabs switch between Dashboard, Family and Notes", async ({ page }) => {
     await page.goto("/caregiver");
 
-    // Default: dashboard
-    await expect(
-      page.getByRole("heading", { name: "Today's Summary" })
-    ).toBeVisible();
-    await expect(page.getByText("AI Generated Rollup")).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Today's Summary" })).toBeVisible();
     await page.screenshot({ path: `${SHOTS}/05-caregiver-dashboard.png`, fullPage: true });
 
-    // Faces tab
-    await page.getByRole("button", { name: "Identity & Faces" }).click();
-    await expect(
-      page.getByRole("heading", { name: "Enroll a New Family Member" })
-    ).toBeVisible();
+    await page.getByRole("button", { name: "Family Members" }).click();
+    await expect(page.getByRole("heading", { name: "Add a Family Member" })).toBeVisible();
 
-    // Life Story tab
-    await page.getByRole("button", { name: "Life Story Vault" }).click();
+    await page.getByRole("button", { name: "Patient Notes" }).click();
     await expect(
-      page.getByRole("heading", { name: "Add a Memory or Fact" })
+      page.getByRole("heading", { name: "General facts about the patient" })
     ).toBeVisible();
   });
 
-  test("enrolling a life-story memory persists to the vector DB (Feature 4 enroll)", async ({
-    page,
-  }) => {
+  test("adding a general patient note persists and is listed", async ({ page, request }) => {
     await page.goto("/caregiver");
-    await page.getByRole("button", { name: "Life Story Vault" }).click();
+    await page.getByRole("button", { name: "Patient Notes" }).click();
 
-    const memory =
-      "Helen grew up in Scarborough and loves gardening and Earl Grey tea.";
-    await page.locator("textarea").fill(memory);
+    const note = `Helen grew up in Scarborough ${Date.now()}`;
+    await page.locator("textarea").fill(note);
+    await page.getByRole("button", { name: "Save Note" }).click();
 
-    const enrollResp = page.waitForResponse(
-      (r) =>
-        r.url().includes("/api/enroll_memory") &&
-        r.request().method() === "POST"
-    );
-    await page.getByRole("button", { name: "Save to Local VectorDB" }).click();
+    await expect(page.getByText("Saved to the offline vault.")).toBeVisible();
+    await expect(page.getByText(note)).toBeVisible();
+    await page.screenshot({ path: `${SHOTS}/06-caregiver-notes.png`, fullPage: true });
 
-    const resp = await enrollResp;
-    expect(resp.status()).toBe(200);
-    const body = await resp.json();
-    expect(body.status).toBe("success");
-    expect(body.memory_id).toBeTruthy();
-
-    await expect(
-      page.getByText("Memory successfully saved to the local offline Vault!")
-    ).toBeVisible();
-    await page.screenshot({ path: `${SHOTS}/06-caregiver-enrolled.png`, fullPage: true });
+    // cleanup
+    const list = await (await request.get("/api/journal")).json();
+    const mem = (list.general as { id: string; text: string }[]).find((x) => x.text === note);
+    if (mem) await request.delete(`/api/memories/${mem.id}`);
   });
 
-  test("enrolling a face via photo upload extracts and stores an embedding (Feature 2 enroll)", async ({
+  test("add a family member WITH a photo enrolls their face (optional photo)", async ({
     page,
+    request,
   }) => {
     await page.goto("/caregiver");
-    await page.getByRole("button", { name: "Identity & Faces" }).click();
+    await page.getByRole("button", { name: "Family Members" }).click();
 
-    await page.locator('input[placeholder="e.g. Sarah"]').fill("Grace");
-    await page.locator('input[placeholder="e.g. Daughter"]').fill("Wife");
+    const name = `Mina${Date.now()}`;
+    await page.getByPlaceholder(/^Name/).fill(name);
+    await page.getByPlaceholder(/^Relationship/).fill("aunt");
     await page.locator('input[type="file"]').setInputFiles(FACE_A);
 
-    const enrollResp = page.waitForResponse(
-      (r) =>
-        new URL(r.url()).pathname === "/api/enroll" &&
-        r.request().method() === "POST",
+    const resp = page.waitForResponse(
+      (r) => new URL(r.url()).pathname === "/api/people" && r.request().method() === "POST",
       { timeout: 30_000 }
     );
-    await page.getByRole("button", { name: "Extract Face Embedding" }).click();
+    await page.getByRole("button", { name: "Add Family Member" }).click();
 
-    const resp = await enrollResp;
-    expect(resp.status()).toBe(200);
-    expect((await resp.json()).status).toBe("success");
+    const r = await resp;
+    expect(r.status()).toBe(200);
+    const body = await r.json();
+    expect(body.status).toBe("success");
+    expect(body.has_photo).toBe(true);
+    await expect(page.getByText(new RegExp(`${name} added`))).toBeVisible();
+    await expect(page.getByText(name, { exact: false }).first()).toBeVisible();
+    await page.screenshot({ path: `${SHOTS}/07-caregiver-family.png`, fullPage: true });
 
-    await expect(page.getByText(/enrolled\. Photo discarded/)).toBeVisible();
-    await page.screenshot({ path: `${SHOTS}/07-caregiver-face-enrolled.png`, fullPage: true });
+    await request.delete(`/api/people/${body.person_id}`);
   });
 
-  test("face enroll gives visible feedback when fields are missing (no silent dead button)", async ({
+  test("family member can be added WITHOUT a photo, then given facts", async ({
     page,
+    request,
   }) => {
-    await page.goto("/caregiver");
-    await page.getByRole("button", { name: "Identity & Faces" }).click();
+    // Seed a person via API, then drive the profile UI.
+    const name = `Zoe${Date.now()}`;
+    const created = await request.post("/api/people", {
+      data: { name, relationship: "friend" },
+    });
+    const personId = (await created.json()).person_id;
 
-    // Photo only, no name/relationship — must NOT silently do nothing.
-    await page.locator('input[type="file"]').setInputFiles(FACE_A);
-    await page.getByRole("button", { name: "Extract Face Embedding" }).click();
-    await expect(
-      page.getByText("Please enter both a name and a relationship.")
-    ).toBeVisible();
+    await page.goto("/caregiver");
+    await page.getByRole("button", { name: "Family Members" }).click();
+    await page.getByText(name, { exact: false }).first().click();
+
+    const fact = `enjoys watercolour painting ${Date.now()}`;
+    await page.getByPlaceholder(/Add a fact about/).fill(fact);
+    await page.getByRole("button", { name: "Add", exact: true }).click();
+    await expect(page.getByText(fact)).toBeVisible();
+
+    await request.delete(`/api/people/${personId}`);
+  });
+
+  test("add family member gives feedback when name/relationship missing", async ({ page }) => {
+    await page.goto("/caregiver");
+    await page.getByRole("button", { name: "Family Members" }).click();
+    await page.getByRole("button", { name: "Add Family Member" }).click();
+    await expect(page.getByText("Please enter a name and a relationship.")).toBeVisible();
   });
 });
 
 test.describe("Backend API contract (via /api proxy)", () => {
-  test("POST /api/ask returns a companion reply", async ({ request }) => {
-    const r = await request.post("/api/ask", {
-      data: { user_input: "When is my daughter coming to visit?" },
-    });
-    expect(r.status()).toBe(200);
-    expect((await r.json()).reply).toBeTruthy();
-  });
-
-  test("real face enroll + identify round-trip (recognizes A, rejects B)", async ({
+  test("POST /api/ask returns a REAL companion reply (not the fallback)", async ({
     request,
   }) => {
-    // Enroll person A...
-    const e = await request.post("/api/enroll", {
-      data: { name: "Grace", relationship: "wife", image_base64: b64(FACE_A) },
+    const r = await request.post("/api/ask", {
+      data: { user_input: "When is my daughter coming to visit?" },
+      timeout: 60_000,
+    });
+    expect(r.status()).toBe(200);
+    const reply = (await r.json()).reply as string;
+    expect(reply.length).toBeGreaterThan(0);
+    expect(reply).not.toBe(
+      "I hear you, my friend. Let's take a look at the garden together."
+    );
+  });
+
+  test("POST /api/transcribe accurately transcribes spoken audio", async ({
+    request,
+  }) => {
+    const wav = fs.readFileSync("e2e/fixtures/voice_sarah.wav");
+    const r = await request.post("/api/transcribe", {
+      timeout: 30_000,
+      multipart: {
+        file: { name: "voice.wav", mimeType: "audio/wav", buffer: wav },
+      },
+    });
+    expect(r.status()).toBe(200);
+    expect((await r.json()).text.toLowerCase()).toContain("sarah");
+  });
+
+  test("person with photo is recognized by name AND a remembered fact", async ({
+    request,
+  }) => {
+    // Create a unique person on FACE_B (kept clean of other test data) + a fact.
+    const name = `Liang${Date.now()}`;
+    const create = await request.post("/api/people", {
+      data: { name, relationship: "nephew", image_base64: b64(FACE_B) },
       timeout: 30_000,
     });
-    expect(e.status()).toBe(200);
-    expect((await e.json()).status).toBe("success");
+    expect(create.status()).toBe(200);
+    const body = await create.json();
+    expect(body.status).toBe("success");
+    expect(body.has_photo).toBe(true);
+    const personId = body.person_id;
+    await request.post(`/api/people/${personId}/memories`, {
+      data: { text: "loves chess and jazz records" },
+    });
 
-    // ...the same face is recognized as Grace...
+    // Identifying that face returns the name AND the remembered fact.
     const m = await request.post("/api/identify", {
-      data: { image_base64: b64(FACE_A) },
+      data: { image_base64: b64(FACE_B) },
       timeout: 30_000,
     });
     const mb = await m.json();
     expect(mb.match).toBe(true);
-    expect(mb.name).toBe("Grace");
-    expect(mb.relationship).toBe("wife");
+    expect(mb.name).toBe(name);
+    expect(mb.fact).toContain("chess");
 
-    // ...and a different person is NOT matched (proves it's real, not a mock).
+    // A different face is NOT this person (proves it's real recognition).
     const n = await request.post("/api/identify", {
-      data: { image_base64: b64(FACE_B) },
+      data: { image_base64: b64(FACE_A) },
       timeout: 30_000,
     });
-    expect((await n.json()).match).toBe(false);
+    const nb = await n.json();
+    if (nb.match) expect(nb.name).not.toBe(name);
+
+    await request.delete(`/api/people/${personId}`);
   });
 
   test("POST /api/enroll_memory writes to the vault", async ({ request }) => {
@@ -239,18 +296,142 @@ test.describe("Backend API contract (via /api proxy)", () => {
     expect((await r.json()).status).toBe("success");
   });
 
-  test("POST /api/synthesize returns WAV audio", async ({ request }) => {
+  test("POST /api/synthesize returns real WAV audio (not the 44-byte mock)", async ({
+    request,
+  }) => {
     const r = await request.post("/api/synthesize", {
-      data: { user_input: "Good morning Helen" },
+      data: { user_input: "Good morning Helen, it is lovely to see you." },
+      timeout: 30_000,
     });
     expect(r.status()).toBe(200);
     expect(r.headers()["content-type"]).toContain("audio/wav");
+    expect((await r.body()).length).toBeGreaterThan(2000);
   });
 
   test("GET /api/briefing returns a daily briefing", async ({ request }) => {
     const r = await request.get("/api/briefing");
     expect(r.status()).toBe(200);
     expect((await r.json()).briefing).toBeTruthy();
+  });
+
+  test("GET /api/journal groups people + general notes", async ({ request }) => {
+    const r = await request.get("/api/journal");
+    expect(r.status()).toBe(200);
+    const data = await r.json();
+    expect(Array.isArray(data.people)).toBe(true);
+    expect(Array.isArray(data.general)).toBe(true);
+  });
+
+  test("person lifecycle: create → add fact → list → delete", async ({ request }) => {
+    const name = `Probe${Date.now()}`;
+    const c = await request.post("/api/people", { data: { name, relationship: "cousin" } });
+    const id = (await c.json()).person_id;
+
+    await request.post(`/api/people/${id}/memories`, { data: { text: "plays the violin" } });
+    const detail = await (await request.get(`/api/people/${id}`)).json();
+    expect(detail.name).toBe(name);
+    expect(detail.memories.some((m: { text: string }) => m.text === "plays the violin")).toBe(true);
+
+    await request.delete(`/api/people/${id}`);
+    const after = await request.get(`/api/people/${id}`);
+    expect(after.status()).toBe(404);
+  });
+
+  test("calendar event lifecycle + push endpoints", async ({ request }) => {
+    // Create a daily medication
+    const c = await request.post("/api/events", {
+      data: {
+        type: "medication",
+        title: `TestPill${Date.now()}`,
+        notes: "1 tablet",
+        time: "16:00",
+        recurrence: "daily",
+      },
+    });
+    expect(c.status()).toBe(200);
+    const ev = await c.json();
+    expect(ev.id).toBeTruthy();
+    expect(ev.recurrence).toBe("daily");
+
+    const list = await (await request.get("/api/events")).json();
+    expect(list.events.some((e: { id: string }) => e.id === ev.id)).toBe(true);
+
+    // Push plumbing
+    const key = await (await request.get("/api/push/public_key")).json();
+    expect(key.public_key.length).toBeGreaterThan(80);
+    const test = await request.post("/api/push/test");
+    expect(test.status()).toBe(200);
+    expect(typeof (await test.json()).sent).toBe("number"); // 0 with no subscribers
+
+    await request.delete(`/api/events/${ev.id}`);
+    const after = await (await request.get("/api/events")).json();
+    expect(after.events.some((e: { id: string }) => e.id === ev.id)).toBe(false);
+  });
+});
+
+test.describe("Stored data views (verify what's saved)", () => {
+  test("Patient Memories overlay groups memories by family member", async ({
+    page,
+    request,
+  }) => {
+    // Seed a person with a fact so the overlay has a person section.
+    const name = `Overlay${Date.now()}`;
+    const c = await request.post("/api/people", { data: { name, relationship: "brother" } });
+    const id = (await c.json()).person_id;
+    await request.post(`/api/people/${id}/memories`, { data: { text: "was a sailor for 30 years" } });
+
+    await page.goto("/patient");
+    await page.getByRole("button", { name: "Memories" }).click();
+    await expect(page.getByRole("heading", { name: "Your Memories" })).toBeVisible();
+    await expect(page.getByText(name, { exact: false }).first()).toBeVisible();
+    await expect(page.getByText("was a sailor for 30 years")).toBeVisible();
+    await page.screenshot({ path: `${SHOTS}/08-patient-memories.png`, fullPage: true });
+    await page.getByRole("button", { name: "Close" }).click();
+    await expect(page.getByRole("heading", { name: "Your Memories" })).not.toBeVisible();
+
+    await request.delete(`/api/people/${id}`);
+  });
+
+  test("Caregiver Calendar: add a medication event and see it scheduled", async ({
+    page,
+    request,
+  }) => {
+    await page.goto("/caregiver");
+    await page.getByRole("button", { name: "Calendar" }).click();
+    await expect(page.getByRole("heading", { name: /Calendar/ })).toBeVisible();
+
+    const title = `Heart Pill ${Date.now()}`;
+    // medication is the default type
+    await page.getByPlaceholder(/Medicine name/).fill(title);
+    await page.getByPlaceholder(/Take 1 tablet|Note/).first().fill("Take 1 tablet with water");
+    await page.getByRole("button", { name: "Add to Calendar" }).click();
+
+    await expect(page.getByText(/Reminds every day at/)).toBeVisible();
+    await expect(page.getByText(title)).toBeVisible();
+    await page.screenshot({ path: `${SHOTS}/09-caregiver-calendar.png`, fullPage: true });
+
+    // cleanup
+    const list = await (await request.get("/api/events")).json();
+    const ev = (list.events as { id: string; title: string }[]).find((e) => e.title === title);
+    if (ev) await request.delete(`/api/events/${ev.id}`);
+  });
+
+  test("Patient reminder card shows from a notification payload + can be dismissed", async ({
+    page,
+  }) => {
+    const payload = encodeURIComponent(
+      JSON.stringify({ title: "💊 Time for your Heart Pill", body: "Take 1 tablet with water", type: "medication" })
+    );
+    await page.goto(`/patient?reminder=${payload}`);
+
+    await expect(page.getByRole("heading", { name: "💊 Time for your Heart Pill" })).toBeVisible();
+    await expect(page.getByText("Take 1 tablet with water")).toBeVisible();
+    await page.screenshot({ path: `${SHOTS}/10-patient-reminder.png`, fullPage: true });
+
+    await page.getByRole("button", { name: "✓ I took it" }).click();
+    await expect(
+      page.getByRole("heading", { name: "💊 Time for your Heart Pill" })
+    ).not.toBeVisible();
   });
 });
 
@@ -264,8 +445,11 @@ test.describe("Spec gaps (P0 features missing in UI)", () => {
     "Daily Briefing has a Patient-facing UI (backend /briefing exists, no UI calls it)",
     async () => {}
   );
+  // NOTE: the Patient "Memories" button now works (lists life-story memories,
+  // tap to hear). What's still missing is the richer photo + voice-caption
+  // journal from the spec.
   test.fixme(
-    'Photo Memory Journal exists (Patient "Memories" button is a no-op; no journal view)',
+    "Photo Memory Journal with photos + voice captions (text memories work; no photo journal yet)",
     async () => {}
   );
   test.fixme(

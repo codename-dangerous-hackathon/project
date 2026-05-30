@@ -1,4 +1,7 @@
 import { defineConfig, devices } from "@playwright/test";
+import path from "path";
+
+const VOICE_WAV = path.resolve(__dirname, "e2e/fixtures/voice_sarah.wav");
 
 // E2E config for the Anchor app. Assumes the production server is already
 // running on http://localhost:3000 (make build && make start) and the FastAPI
@@ -23,6 +26,9 @@ export default defineConfig({
         "--use-fake-device-for-media-stream",
         "--use-fake-ui-for-media-stream",
         "--autoplay-policy=no-user-gesture-required",
+        // Feed real spoken audio into the fake microphone so the voice loop
+        // can be tested end-to-end (Whisper actually transcribes it).
+        `--use-file-for-fake-audio-capture=${VOICE_WAV}`,
       ],
     },
   },

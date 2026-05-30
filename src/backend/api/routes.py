@@ -6,6 +6,7 @@ from agents.companion import ask_companion
 from database.chroma_manager import vdb
 from tools.audio import transcribe_audio_local, synthesize_speech_local
 from tools.vision import extract_face_embedding_from_base64
+from services import reminders
 import uuid
 
 router = APIRouter()
@@ -15,8 +16,13 @@ router = APIRouter()
 # different faces, so 0.35 is a comfortable, conservative cut.
 FACE_MATCH_THRESHOLD = 0.35
 
+class ChatTurn(BaseModel):
+    role: str
+    content: str
+
 class AskRequest(BaseModel):
     user_input: str
+    history: Optional[List[ChatTurn]] = None
 
 class EnrollMemoryRequest(BaseModel):
     text: str
@@ -33,6 +39,25 @@ class IdentifyRequest(BaseModel):
     # Base64 string of the captured image from the UI
     image_base64: str
 
+class CreatePersonRequest(BaseModel):
+    name: str
+    relationship: str
+    image_base64: Optional[str] = None  # photo is optional
+
+class EventRequest(BaseModel):
+    type: str                       # medication | appointment | family
+    title: str
+    notes: Optional[str] = ""
+    time: str                       # "HH:MM" (24h)
+    date: Optional[str] = ""        # "YYYY-MM-DD" for one-off events
+    recurrence: Optional[str] = "once"  # "daily" for medications, else "once"
+
+class PersonMemoryRequest(BaseModel):
+    text: str
+
+class PersonPhotoRequest(BaseModel):
+    image_base64: str
+
 @router.post("/ask")
 async def ask_endpoint(request: AskRequest):
     """
@@ -40,7 +65,8 @@ async def ask_endpoint(request: AskRequest):
     Passes the input to the NemoClaw/Nemotron Companion Agent.
     """
     try:
-        reply = ask_companion(request.user_input)
+        history = [turn.model_dump() for turn in request.history] if request.history else None
+        reply = ask_companion(request.user_input, history=history)
         return {"reply": reply}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -85,20 +111,156 @@ async def identify_person(request: IdentifyRequest):
         results = vdb.recognize_face(embedding_query=embedding, n_results=1)
         distances = results.get("distances") or [[]]
         metadatas = results.get("metadatas") or [[]]
+        ids = results.get("ids") or [[]]
 
         if distances[0]:
             # Chroma cosine distance = 1 - cosine similarity.
             similarity = 1.0 - distances[0][0]
             if similarity >= FACE_MATCH_THRESHOLD:
                 meta = metadatas[0][0]
+                person_id = ids[0][0]
+                # Pull a warm, remembered fact about this person if we have one.
+                person_mems = vdb.list_memories_for_person(person_id)
+                fact = person_mems[0]["text"] if person_mems else ""
                 return {
                     "match": True,
+                    "person_id": person_id,
                     "name": meta.get("name"),
                     "relationship": meta.get("relationship"),
+                    "fact": fact,
                     "confidence": round(similarity, 3),
                 }
 
         return {"match": False, "message": "I don't recognize this person yet."}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+# ----- Family member profiles (photo optional, rich memories) -----
+
+@router.post("/people")
+async def create_person(request: CreatePersonRequest):
+    """Create a family member. Photo is optional — facts work without one."""
+    try:
+        if not request.name.strip() or not request.relationship.strip():
+            raise HTTPException(status_code=400, detail="Name and relationship are required.")
+        person_id = str(uuid.uuid4())
+        if request.image_base64:
+            embedding = extract_face_embedding_from_base64(request.image_base64)
+            if embedding is None:
+                # Still create the person, just without face recognition.
+                vdb.add_person(person_id, request.name, request.relationship, has_photo=False)
+                return {
+                    "status": "no_face",
+                    "person_id": person_id,
+                    "name": request.name,
+                    "has_photo": False,
+                    "message": "Saved — but no clear face was detected, so 'Who is this?' won't recognize them yet. Add a clearer photo anytime.",
+                }
+            vdb.set_person_photo(person_id, embedding, request.name, request.relationship)
+            return {"status": "success", "person_id": person_id, "name": request.name, "has_photo": True}
+        vdb.add_person(person_id, request.name, request.relationship, has_photo=False)
+        return {"status": "success", "person_id": person_id, "name": request.name, "has_photo": False}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/people")
+async def list_people():
+    try:
+        return {"people": vdb.list_people()}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/people/{person_id}")
+async def get_person(person_id: str):
+    person = vdb.get_person(person_id)
+    if not person:
+        raise HTTPException(status_code=404, detail="Person not found")
+    person["memories"] = vdb.list_memories_for_person(person_id)
+    return person
+
+@router.delete("/people/{person_id}")
+async def delete_person(person_id: str):
+    try:
+        vdb.delete_person(person_id)
+        return {"status": "deleted", "id": person_id}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.post("/people/{person_id}/memories")
+async def add_person_memory(person_id: str, request: PersonMemoryRequest):
+    person = vdb.get_person(person_id)
+    if not person:
+        raise HTTPException(status_code=404, detail="Person not found")
+    if not request.text.strip():
+        raise HTTPException(status_code=400, detail="Memory text is required.")
+    mem_id = str(uuid.uuid4())
+    vdb.add_memory(mem_id, request.text, metadata={
+        "person_id": person_id,
+        "person_name": person["name"],
+        "relationship": person["relationship"],
+        "scope": "person",
+        "tags": "person",
+    })
+    return {"status": "success", "memory_id": mem_id}
+
+@router.post("/people/{person_id}/photo")
+async def set_person_photo(person_id: str, request: PersonPhotoRequest):
+    person = vdb.get_person(person_id)
+    if not person:
+        raise HTTPException(status_code=404, detail="Person not found")
+    embedding = extract_face_embedding_from_base64(request.image_base64)
+    if embedding is None:
+        return {"status": "no_face", "message": "No clear face detected. Try a well-lit, front-facing photo."}
+    vdb.set_person_photo(person_id, embedding, person["name"], person["relationship"])
+    return {"status": "success"}
+
+# ----- Calendar events + Web Push reminders -----
+
+@router.get("/events")
+async def get_events():
+    return {"events": reminders.list_events()}
+
+@router.post("/events")
+async def create_event(request: EventRequest):
+    return reminders.add_event(request.model_dump())
+
+@router.delete("/events/{event_id}")
+async def delete_event(event_id: str):
+    reminders.delete_event(event_id)
+    return {"status": "deleted", "id": event_id}
+
+@router.get("/push/public_key")
+async def push_public_key():
+    return {"public_key": reminders.VAPID_PUBLIC}
+
+@router.post("/push/subscribe")
+async def push_subscribe(subscription: dict):
+    reminders.add_subscription(subscription)
+    return {"status": "subscribed"}
+
+@router.post("/push/test")
+async def push_test():
+    """Fire a test push to all subscribed devices (to verify notifications)."""
+    sent = reminders.send_push({
+        "title": "🔔 Anchor reminder test",
+        "body": "Great — reminders are working!",
+        "type": "test",
+        "event_id": "test",
+        "event_title": "Test",
+    })
+    return {"sent": sent}
+
+@router.get("/journal")
+async def journal():
+    """Grouped view for the patient: each family member with their memories,
+    plus general notes about the patient."""
+    try:
+        people = []
+        for p in vdb.list_people():
+            people.append({**p, "memories": vdb.list_memories_for_person(p["id"])})
+        return {"people": people, "general": vdb.list_general_memories()}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -115,6 +277,38 @@ async def enroll_memory(request: EnrollMemoryRequest):
             metadata={"date": request.date or "", "tags": request.tags or ""}
         )
         return {"status": "success", "memory_id": mem_id}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/memories")
+async def list_memories():
+    """List every life-story memory so the caregiver can verify what's stored."""
+    try:
+        return {"memories": vdb.list_memories()}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.delete("/memories/{memory_id}")
+async def delete_memory(memory_id: str):
+    try:
+        vdb.delete_memory(memory_id)
+        return {"status": "deleted", "id": memory_id}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/faces")
+async def list_faces():
+    """List every enrolled person (name + relationship; embeddings stay private)."""
+    try:
+        return {"faces": vdb.list_faces()}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.delete("/faces/{person_id}")
+async def delete_face(person_id: str):
+    try:
+        vdb.delete_face(person_id)
+        return {"status": "deleted", "id": person_id}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

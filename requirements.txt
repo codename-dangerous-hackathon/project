@@ -22,6 +22,10 @@ insightface           # RetinaFace detector + ArcFace embeddings (buffalo_l)
 onnxruntime           # Runs the InsightFace ONNX models locally
 opencv-python-headless # Image decoding for the vision pipeline
 
+# On-device speech (the voice companion loop)
+faster-whisper        # Local STT (patient speech -> text)
+piper-tts             # Local TTS (companion text -> warm voice)
+
 # LLM Frameworks (RAG)
 langchain
 langchain-nvidia-ai-endpoints

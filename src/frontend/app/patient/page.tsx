@@ -1,15 +1,35 @@
 "use client";
 
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useCallback } from "react";
 import Link from "next/link";
 
+// VAPID public key (base64url) -> Uint8Array for PushManager.subscribe.
+function urlBase64ToUint8Array(base64String: string) {
+  const padding = "=".repeat((4 - (base64String.length % 4)) % 4);
+  const base64 = (base64String + padding).replace(/-/g, "+").replace(/_/g, "/");
+  const raw = atob(base64);
+  const arr = new Uint8Array(raw.length);
+  for (let i = 0; i < raw.length; i++) arr[i] = raw.charCodeAt(i);
+  return arr;
+}
+
 export default function PatientPage() {
-  const [status, setStatus] = useState<"idle" | "listening" | "speaking" | "camera">("idle");
+  const [status, setStatus] = useState<
+    "idle" | "listening" | "thinking" | "speaking" | "camera"
+  >("idle");
   const [subtitle, setSubtitle] = useState("I am here to help you.");
-  
+  const [lastHeard, setLastHeard] = useState("");
+
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
+
+  // Voice conversation state
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const audioChunksRef = useRef<Blob[]>([]);
+  const micStreamRef = useRef<MediaStream | null>(null);
+  // Multi-turn history so the companion can actually follow the conversation.
+  const historyRef = useRef<{ role: "user" | "assistant"; content: string }[]>([]);
 
   // Attach the camera stream once the <video> element is actually mounted.
   // The video is only rendered when status === "camera", so we cannot assign
@@ -20,56 +40,201 @@ export default function PatientPage() {
     }
   }, [status]);
 
-  // Mock Handle Talk Button
+  // --- Memories overlay (reminiscence: read the life story aloud, by person) ---
+  type Mem = { id: string; text: string };
+  type PersonGroup = { id: string; name: string; relationship: string; memories: Mem[] };
+  const [memoriesOpen, setMemoriesOpen] = useState(false);
+  const [people, setPeople] = useState<PersonGroup[]>([]);
+  const [general, setGeneral] = useState<Mem[]>([]);
+
+  const openMemories = async () => {
+    try {
+      const res = await fetch("/api/journal");
+      const data = await res.json();
+      setPeople((data.people || []).filter((p: PersonGroup) => p.memories.length > 0));
+      setGeneral(data.general || []);
+    } catch {
+      setPeople([]);
+      setGeneral([]);
+    }
+    setMemoriesOpen(true);
+  };
+
+  const speakText = async (text: string) => {
+    try {
+      const res = await fetch("/api/synthesize", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ user_input: text }),
+      });
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      if (!audioRef.current) audioRef.current = new Audio(url);
+      else audioRef.current.src = url;
+      audioRef.current.play().catch(() => {});
+    } catch {
+      /* ignore */
+    }
+  };
+
+  // --- Reminders (medication / appointment / family push notifications) ---
+  type Reminder = { title?: string; body?: string; type?: string };
+  const [reminder, setReminder] = useState<Reminder | null>(null);
+  const [remindersOn, setRemindersOn] = useState(false);
+
+  const showReminder = useCallback((payload: Reminder) => {
+    setReminder(payload);
+    speakText(`${payload.title || "Reminder"}. ${payload.body || ""}`);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    const onMsg = (e: MessageEvent) => {
+      if (e.data?.type === "anchor-reminder") showReminder(e.data.payload);
+    };
+    navigator.serviceWorker?.addEventListener("message", onMsg);
+    // Opened from a notification click (?reminder=...)
+    const r = new URLSearchParams(window.location.search).get("reminder");
+    if (r) {
+      try { showReminder(JSON.parse(r)); } catch { /* ignore */ }
+    }
+    if (typeof Notification !== "undefined" && Notification.permission === "granted") {
+      setRemindersOn(true);
+    }
+    return () => navigator.serviceWorker?.removeEventListener("message", onMsg);
+  }, [showReminder]);
+
+  const enableReminders = async () => {
+    try {
+      if (typeof Notification === "undefined" || !("serviceWorker" in navigator)) {
+        alert("Notifications aren't supported on this device.");
+        return;
+      }
+      const perm = await Notification.requestPermission();
+      if (perm !== "granted") {
+        alert("Please allow notifications so you can get reminders.");
+        return;
+      }
+      const reg = await navigator.serviceWorker.ready;
+      const { public_key } = await (await fetch("/api/push/public_key")).json();
+      const sub = await reg.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey: urlBase64ToUint8Array(public_key),
+      });
+      await fetch("/api/push/subscribe", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(sub),
+      });
+      setRemindersOn(true);
+    } catch (e) {
+      console.error("enable reminders failed", e);
+      alert("Could not enable reminders.");
+    }
+  };
+
+  // One big button drives the whole conversation. Tap to start listening, tap
+  // again to stop — then we transcribe, ask the companion, and speak the reply.
   const handleTalk = async () => {
     if (status === "camera") stopCamera();
-    setStatus("listening");
-    setSubtitle("Listening...");
-    
-    // In production, we'd record MediaRecorder audio here and send to /transcribe.
-    // For now we'll simulate a flow:
-    setTimeout(async () => {
-      setStatus("speaking");
-      setSubtitle("Let me think about that...");
-      
-      try {
-        // Here we'd normally pass the transcribed text
-        const response = await fetch("/api/ask", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ user_input: "When is my daughter coming?" })
+    if (status === "idle") {
+      await startListening();
+    } else if (status === "listening") {
+      stopListening();
+    } else if (status === "speaking") {
+      // Barge-in: stop the companion and let the person speak again.
+      audioRef.current?.pause();
+      await startListening();
+    }
+    // "thinking" → ignore taps (button is disabled then anyway).
+  };
+
+  const startListening = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      micStreamRef.current = stream;
+      audioChunksRef.current = [];
+      const recorder = new MediaRecorder(stream);
+      recorder.ondataavailable = (e) => {
+        if (e.data.size > 0) audioChunksRef.current.push(e.data);
+      };
+      recorder.onstop = () => {
+        stream.getTracks().forEach((t) => t.stop());
+        const blob = new Blob(audioChunksRef.current, {
+          type: recorder.mimeType || "audio/webm",
         });
-        
-        const data = await response.json();
-        setSubtitle(data.reply || "I am always here for you.");
-        
-        // Fetch audio for the reply
-        const audioRes = await fetch("/api/synthesize", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ user_input: data.reply || "Hello" })
-        });
-        
-        const blob = await audioRes.blob();
-        const url = URL.createObjectURL(blob);
-        
-        if (!audioRef.current) {
-          audioRef.current = new Audio(url);
-        } else {
-          audioRef.current.src = url;
-        }
-        
-        audioRef.current.play();
-        audioRef.current.onended = () => {
-          setStatus("idle");
-          setSubtitle("Press the big button to talk to me.");
-        };
-      } catch (e) {
-        console.error("Backend offline", e);
+        processTurn(blob);
+      };
+      mediaRecorderRef.current = recorder;
+      recorder.start();
+      setLastHeard("");
+      setStatus("listening");
+      setSubtitle("I'm listening… tap when you're done.");
+    } catch (err) {
+      console.error("Mic access failed", err);
+      setStatus("idle");
+      setSubtitle("I couldn't hear the microphone. Please allow mic access.");
+    }
+  };
+
+  const stopListening = () => {
+    mediaRecorderRef.current?.stop();
+  };
+
+  const processTurn = async (blob: Blob) => {
+    setStatus("thinking");
+    setSubtitle("Let me think about that…");
+    try {
+      // 1. Speech → text (local Whisper)
+      const form = new FormData();
+      form.append("file", blob, "speech.webm");
+      const sttRes = await fetch("/api/transcribe", { method: "POST", body: form });
+      const { text } = await sttRes.json();
+      const heard = (text || "").trim();
+      if (!heard) {
         setStatus("idle");
-        setSubtitle("My connection is resting right now.");
+        setSubtitle("I didn't quite catch that. Tap the button and try again.");
+        return;
       }
-    }, 2000); // simulate listening delay
+      setLastHeard(heard);
+
+      // 2. Text → companion reply (Nemotron, with conversation memory + RAG)
+      const askRes = await fetch("/api/ask", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ user_input: heard, history: historyRef.current }),
+      });
+      const { reply } = await askRes.json();
+      const answer = reply || "I'm right here with you.";
+      historyRef.current.push({ role: "user", content: heard });
+      historyRef.current.push({ role: "assistant", content: answer });
+
+      // 3. Reply text → warm voice (local Piper)
+      setStatus("speaking");
+      setSubtitle(answer);
+      const ttsRes = await fetch("/api/synthesize", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ user_input: answer }),
+      });
+      const audioBlob = await ttsRes.blob();
+      const url = URL.createObjectURL(audioBlob);
+      if (!audioRef.current) audioRef.current = new Audio(url);
+      else audioRef.current.src = url;
+      audioRef.current.onended = () => {
+        setStatus("idle");
+        setSubtitle("Tap the button whenever you'd like to keep talking.");
+      };
+      await audioRef.current.play().catch(() => {
+        // Autoplay blocked — leave the text on screen and return to idle.
+        setStatus("idle");
+        setSubtitle(answer);
+      });
+    } catch (e) {
+      console.error("Conversation error", e);
+      setStatus("idle");
+      setSubtitle("My connection is resting right now. Let's try again in a moment.");
+    }
   };
 
   const startCamera = async () => {
@@ -119,11 +284,11 @@ export default function PatientPage() {
         body: JSON.stringify({ image_base64: base64Image })
       });
       const data = await res.json();
-      
-      const reply = data.match 
-        ? `This is ${data.name}, your ${data.relationship}.` 
-        : "I don't recognize this person yet.";
-        
+
+      const reply = data.match
+        ? `This is ${data.name}, your ${data.relationship}.${data.fact ? " " + data.fact : ""}`
+        : (data.message || "I don't recognize this person yet.");
+
       setSubtitle(reply);
       stopCamera();
       
@@ -153,10 +318,45 @@ export default function PatientPage() {
         <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
       </Link>
 
+      {/* Enable reminders (top right) */}
+      <button
+        onClick={enableReminders}
+        className="absolute top-6 right-6 px-4 py-3 text-sm text-zinc-400 hover:text-zinc-100 bg-zinc-900/50 hover:bg-zinc-800 rounded-full transition-colors"
+        title="Enable medication & event reminders"
+      >
+        {remindersOn ? "🔔 Reminders on" : "🔕 Turn on reminders"}
+      </button>
+
+      {/* Full-screen reminder card (medication / appointment / family) */}
+      {reminder && (
+        <div className="absolute inset-0 z-30 bg-black/95 flex flex-col items-center justify-center p-8 text-center">
+          <div className="text-8xl mb-6">
+            {reminder.type === "medication" ? "💊" : reminder.type === "appointment" ? "📅" : reminder.type === "family" ? "👪" : "🔔"}
+          </div>
+          <h2 className="text-5xl md:text-6xl font-semibold text-white mb-4 max-w-3xl leading-tight">
+            {reminder.title}
+          </h2>
+          {reminder.body && (
+            <p className="text-3xl text-zinc-300 mb-12 max-w-2xl">{reminder.body}</p>
+          )}
+          <button
+            onClick={() => setReminder(null)}
+            className="bg-emerald-600 hover:bg-emerald-500 text-white text-3xl font-bold rounded-full px-16 py-8 shadow-2xl active:scale-95 transition-transform"
+          >
+            {reminder.type === "medication" ? "✓ I took it" : "✓ Okay"}
+          </button>
+        </div>
+      )}
+
       {/* Dynamic Header */}
-      <h1 className="text-4xl md:text-5xl font-medium text-center text-zinc-300 mb-8 max-w-2xl px-4 min-h-[5rem]">
+      <h1 className="text-4xl md:text-5xl font-medium text-center text-zinc-300 mb-2 max-w-2xl px-4 min-h-[5rem]">
         {subtitle}
       </h1>
+
+      {/* What we just heard the patient say (gentle feedback) */}
+      <p className="text-lg md:text-xl text-zinc-500 italic text-center mb-6 max-w-xl px-4 min-h-[2rem]">
+        {lastHeard && `You said: “${lastHeard}”`}
+      </p>
 
       {/* Camera View Overlay */}
       {status === "camera" && (
@@ -174,18 +374,20 @@ export default function PatientPage() {
       
       {/* Massive Glowing Talk Button */}
       {status !== "camera" && (
-        <button 
+        <button
           onClick={handleTalk}
-          disabled={status !== "idle"}
+          disabled={status === "thinking"}
           className={`relative rounded-full transition-all duration-300 flex items-center justify-center shadow-2xl
             ${status === "idle" ? "bg-amber-600 hover:bg-amber-500 hover:scale-105 active:scale-95 h-64 w-64 md:h-80 md:w-80" : ""}
             ${status === "listening" ? "bg-red-600 animate-pulse h-72 w-72 md:h-96 md:w-96" : ""}
+            ${status === "thinking" ? "bg-zinc-600 animate-pulse h-64 w-64 md:h-80 md:w-80" : ""}
             ${status === "speaking" ? "bg-emerald-600 animate-pulse h-64 w-64 md:h-80 md:w-80 shadow-[0_0_80px_rgba(5,150,105,0.6)]" : ""}
           `}
         >
-          <span className="text-4xl md:text-5xl font-bold tracking-wide">
+          <span className="text-3xl md:text-4xl font-bold tracking-wide px-4 text-center leading-tight">
             {status === "idle" && "TALK"}
-            {status === "listening" && "LISTENING"}
+            {status === "listening" && "TAP TO STOP"}
+            {status === "thinking" && "THINKING…"}
             {status === "speaking" && "SPEAKING"}
           </span>
         </button>
@@ -199,10 +401,69 @@ export default function PatientPage() {
         >
           {status === "camera" ? "👁️ Identify Face" : "📷 Who is this?"}
         </button>
-        <button className="flex-1 bg-zinc-800 hover:bg-zinc-700 rounded-3xl py-8 text-2xl md:text-3xl font-medium transition-transform active:scale-95 border border-zinc-700">
+        <button
+          onClick={openMemories}
+          className="flex-1 bg-zinc-800 hover:bg-zinc-700 rounded-3xl py-8 text-2xl md:text-3xl font-medium transition-transform active:scale-95 border border-zinc-700"
+        >
           📖 Memories
         </button>
       </div>
+
+      {/* Memories overlay — tap any memory to hear it read aloud */}
+      {memoriesOpen && (
+        <div className="absolute inset-0 z-20 bg-black/95 flex flex-col p-6 overflow-y-auto">
+          <div className="flex items-center justify-between mb-8 max-w-2xl mx-auto w-full">
+            <h2 className="text-3xl md:text-4xl font-medium text-zinc-200">Your Memories</h2>
+            <button
+              onClick={() => setMemoriesOpen(false)}
+              className="text-zinc-200 bg-zinc-800 hover:bg-zinc-700 rounded-full px-6 py-3 text-xl"
+            >
+              Close
+            </button>
+          </div>
+          <div className="max-w-2xl mx-auto w-full space-y-8 pb-10">
+            {people.length === 0 && general.length === 0 && (
+              <p className="text-zinc-400 text-center text-xl mt-12">
+                No memories yet. Ask your family to add some.
+              </p>
+            )}
+
+            {people.map((p) => (
+              <div key={p.id} className="space-y-3">
+                <h3 className="text-2xl font-semibold text-amber-300">
+                  {p.name} <span className="text-zinc-500 text-xl font-normal">— your {p.relationship}</span>
+                </h3>
+                {p.memories.map((m) => (
+                  <button
+                    key={m.id}
+                    onClick={() => speakText(`${p.name}, your ${p.relationship}. ${m.text}`)}
+                    className="w-full text-left bg-zinc-900 hover:bg-zinc-800 border border-zinc-700 rounded-2xl p-6 text-2xl text-zinc-100 leading-relaxed transition-colors"
+                  >
+                    {m.text}
+                    <span className="block text-zinc-500 text-base mt-3">🔊 Tap to hear this</span>
+                  </button>
+                ))}
+              </div>
+            ))}
+
+            {general.length > 0 && (
+              <div className="space-y-3">
+                <h3 className="text-2xl font-semibold text-zinc-300">About you</h3>
+                {general.map((m) => (
+                  <button
+                    key={m.id}
+                    onClick={() => speakText(m.text)}
+                    className="w-full text-left bg-zinc-900 hover:bg-zinc-800 border border-zinc-700 rounded-2xl p-6 text-2xl text-zinc-100 leading-relaxed transition-colors"
+                  >
+                    {m.text}
+                    <span className="block text-zinc-500 text-base mt-3">🔊 Tap to hear this</span>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
 
     </main>
   );
