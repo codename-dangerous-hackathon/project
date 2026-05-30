@@ -12,14 +12,47 @@ type Person = {
   memory_count: number;
   memories: Mem[];
 };
+type Recurrence = "once" | "daily" | "weekly" | "monthly";
 type EventItem = {
   id: string;
-  type: "medication" | "appointment" | "family";
+  type: "medication" | "appointment" | "family" | "activity";
   title: string;
   notes?: string;
   time: string;
   date?: string;
-  recurrence: "daily" | "once";
+  recurrence: Recurrence;
+};
+
+// Does an event fall on a given YYYY-MM-DD (for rendering on the calendar)?
+function occursOn(e: EventItem, ds: string): boolean {
+  if (e.recurrence === "daily") return true;
+  if (!e.date || ds < e.date) return false;
+  if (e.recurrence === "once") return e.date === ds;
+  const start = new Date(e.date + "T00:00:00");
+  const cur = new Date(ds + "T00:00:00");
+  if (e.recurrence === "weekly") return start.getDay() === cur.getDay();
+  if (e.recurrence === "monthly") return start.getDate() === cur.getDate();
+  return e.date === ds;
+}
+
+function recurrenceLabel(e: EventItem): string {
+  if (e.recurrence === "daily") return `every day at ${e.time}`;
+  if (e.recurrence === "weekly")
+    return `every ${new Date((e.date || "") + "T00:00:00").toLocaleDateString(undefined, { weekday: "long" })} at ${e.time}`;
+  if (e.recurrence === "monthly")
+    return `monthly on day ${new Date((e.date || "") + "T00:00:00").getDate()} at ${e.time}`;
+  return `${e.date} at ${e.time}`;
+}
+type DiscoverEvent = {
+  title: string;
+  url: string;
+  start: string;
+  end: string;
+  online: boolean;
+  venue: string;
+  city: string;
+  image: string;
+  description: string;
 };
 
 function fileToBase64(file: File): Promise<string> {
@@ -29,6 +62,92 @@ function fileToBase64(file: File): Promise<string> {
     reader.onerror = reject;
     reader.readAsDataURL(file);
   });
+}
+
+const WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+const TYPE_STYLE: Record<string, { icon: string; cls: string }> = {
+  medication: { icon: "💊", cls: "bg-amber-100 text-amber-800" },
+  appointment: { icon: "📅", cls: "bg-blue-100 text-blue-800" },
+  family: { icon: "👪", cls: "bg-purple-100 text-purple-800" },
+  activity: { icon: "🎟️", cls: "bg-emerald-100 text-emerald-800" },
+};
+
+function CalendarMonth({
+  events,
+  onDayClick,
+  onEventClick,
+}: {
+  events: EventItem[];
+  onDayClick: (date: string) => void;
+  onEventClick: (ev: EventItem) => void;
+}) {
+  const now = new Date();
+  const [cursor, setCursor] = useState({ y: now.getFullYear(), m: now.getMonth() });
+
+  const pad = (n: number) => String(n).padStart(2, "0");
+  const todayStr = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
+  const first = new Date(cursor.y, cursor.m, 1);
+  const startDay = first.getDay();
+  const daysInMonth = new Date(cursor.y, cursor.m + 1, 0).getDate();
+  const monthName = first.toLocaleString(undefined, { month: "long", year: "numeric" });
+  const dateStr = (day: number) => `${cursor.y}-${pad(cursor.m + 1)}-${pad(day)}`;
+  const eventsForDay = (ds: string) => events.filter((e) => occursOn(e, ds));
+
+  const prev = () => setCursor((c) => (c.m === 0 ? { y: c.y - 1, m: 11 } : { y: c.y, m: c.m - 1 }));
+  const next = () => setCursor((c) => (c.m === 11 ? { y: c.y + 1, m: 0 } : { y: c.y, m: c.m + 1 }));
+
+  const cells: (number | null)[] = [];
+  for (let i = 0; i < startDay; i++) cells.push(null);
+  for (let d = 1; d <= daysInMonth; d++) cells.push(d);
+
+  return (
+    <div className="bg-white border rounded-2xl p-4 sm:p-6 shadow-sm">
+      <div className="flex items-center justify-between mb-4">
+        <button onClick={prev} className="px-3 py-1.5 rounded-lg hover:bg-zinc-100 text-zinc-600 text-xl" aria-label="Previous month">‹</button>
+        <h3 className="font-semibold text-lg">{monthName}</h3>
+        <button onClick={next} className="px-3 py-1.5 rounded-lg hover:bg-zinc-100 text-zinc-600 text-xl" aria-label="Next month">›</button>
+      </div>
+      <div className="grid grid-cols-7 gap-1 text-center text-xs text-zinc-400 mb-1">
+        {WEEKDAYS.map((w) => <div key={w} className="py-1">{w}</div>)}
+      </div>
+      <div className="grid grid-cols-7 gap-1">
+        {cells.map((day, i) => {
+          if (day === null) return <div key={i} />;
+          const ds = dateStr(day);
+          const dayEvents = eventsForDay(ds);
+          const isToday = ds === todayStr;
+          return (
+            <div
+              key={i}
+              onClick={() => onDayClick(ds)}
+              className={`cursor-pointer min-h-[70px] sm:min-h-[88px] rounded-lg border p-1.5 hover:border-zinc-400 transition-colors ${isToday ? "border-zinc-900 bg-zinc-50" : "border-zinc-200"}`}
+            >
+              <div className={`text-xs mb-1 ${isToday ? "font-bold text-zinc-900" : "text-zinc-500"}`}>{day}</div>
+              <div className="space-y-0.5">
+                {dayEvents.slice(0, 3).map((ev) => {
+                  const st = TYPE_STYLE[ev.type] || TYPE_STYLE.family;
+                  return (
+                    <span
+                      key={ev.id}
+                      onClick={(e) => { e.stopPropagation(); onEventClick(ev); }}
+                      className={`block truncate rounded px-1 py-0.5 text-[10px] leading-tight ${st.cls}`}
+                      title={`${ev.title} at ${ev.time}${ev.recurrence === "daily" ? " (every day)" : ""} — click to remove`}
+                    >
+                      {st.icon} {ev.time} {ev.title}
+                    </span>
+                  );
+                })}
+                {dayEvents.length > 3 && (
+                  <span className="block text-[10px] text-zinc-400">+{dayEvents.length - 3} more</span>
+                )}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+      <p className="text-xs text-zinc-400 mt-3">Tap a day to add an event · tap an event to remove it</p>
+    </div>
+  );
 }
 
 export default function CaregiverPage() {
@@ -45,11 +164,12 @@ export default function CaregiverPage() {
   const [evNotes, setEvNotes] = useState("");
   const [evTime, setEvTime] = useState("16:00");
   const [evDate, setEvDate] = useState("");
+  const [evRecurrence, setEvRecurrence] = useState<Recurrence>("daily");
   const [evStatus, setEvStatus] = useState("");
 
   const loadEvents = useCallback(async () => {
     try {
-      const res = await fetch("/api/events");
+      const res = await fetch("/api/events", { cache: "no-store" });
       const data = await res.json();
       setEvents(data.events || []);
     } catch {
@@ -63,24 +183,29 @@ export default function CaregiverPage() {
       setEvStatus("⚠️ Please enter a title.");
       return;
     }
-    const recurrence = evType === "medication" ? "daily" : "once";
-    if (recurrence === "once" && !evDate) {
+    if (evRecurrence !== "daily" && !evDate) {
       setEvStatus("⚠️ Please pick a date for this event.");
       return;
     }
+    const body = {
+      type: evType,
+      title: evTitle,
+      notes: evNotes,
+      time: evTime,
+      date: evRecurrence === "daily" ? "" : evDate,
+      recurrence: evRecurrence,
+    };
     await fetch("/api/events", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        type: evType,
-        title: evTitle,
-        notes: evNotes,
-        time: evTime,
-        date: recurrence === "once" ? evDate : "",
-        recurrence,
-      }),
+      body: JSON.stringify(body),
     });
-    setEvStatus(`✅ Saved. ${recurrence === "daily" ? `Reminds every day at ${evTime}.` : `Reminds on ${evDate} at ${evTime}.`}`);
+    const when =
+      evRecurrence === "daily" ? `every day at ${evTime}`
+      : evRecurrence === "weekly" ? `every week (from ${evDate}) at ${evTime}`
+      : evRecurrence === "monthly" ? `every month (from ${evDate}) at ${evTime}`
+      : `on ${evDate} at ${evTime}`;
+    setEvStatus(`✅ Saved. Reminds ${when}.`);
     setEvTitle("");
     setEvNotes("");
     await loadEvents();
@@ -97,6 +222,53 @@ export default function CaregiverPage() {
     setEvStatus(data.sent > 0
       ? `🔔 Test reminder sent to ${data.sent} device(s).`
       : "No devices subscribed yet — open the Patient screen and tap 'Turn on reminders' first.");
+  };
+
+  // Discover public dementia events (Eventbrite)
+  const [discover, setDiscover] = useState<DiscoverEvent[]>([]);
+  const [discoverLoading, setDiscoverLoading] = useState(false);
+  const [discoverLocation, setDiscoverLocation] = useState("online");
+
+  const loadDiscover = useCallback(async () => {
+    setDiscoverLoading(true);
+    try {
+      const res = await fetch(`/api/discover/events?location=${encodeURIComponent(discoverLocation)}&limit=12`, { cache: "no-store" });
+      const data = await res.json();
+      setDiscover(data.events || []);
+    } catch {
+      setDiscover([]);
+    }
+    setDiscoverLoading(false);
+  }, [discoverLocation]);
+
+  const addDiscoveredEvent = async (ev: DiscoverEvent) => {
+    const [date, t] = (ev.start || "").split("T");
+    const time = (t || "10:00").slice(0, 5);
+    const where = ev.online ? "Online event" : [ev.venue, ev.city].filter(Boolean).join(", ");
+    await fetch("/api/events", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        type: "activity",
+        title: ev.title,
+        notes: `${where}${where ? " — " : ""}${ev.url}`,
+        time,
+        date: date || "",
+        recurrence: "once",
+      }),
+    });
+    await loadEvents();
+    setEvStatus(`✅ Added "${ev.title}" to the calendar.`);
+  };
+
+  const handleCalendarDayClick = (ds: string) => {
+    setEvDate(ds);
+    if (evType === "medication") setEvType("appointment");
+  };
+  const handleCalendarEventClick = (ev: EventItem) => {
+    if (typeof window !== "undefined" && window.confirm(`Remove "${ev.title}" from the calendar?`)) {
+      deleteEvent(ev.id);
+    }
   };
 
   // Add-person form
@@ -116,7 +288,7 @@ export default function CaregiverPage() {
 
   const load = useCallback(async () => {
     try {
-      const res = await fetch("/api/journal");
+      const res = await fetch("/api/journal", { cache: "no-store" });
       const data = await res.json();
       setPeople(data.people || []);
       setGeneral(data.general || []);
@@ -127,8 +299,12 @@ export default function CaregiverPage() {
 
   useEffect(() => {
     if (activeTab === "family" || activeTab === "notes") load();
-    if (activeTab === "calendar") loadEvents();
-  }, [activeTab, load, loadEvents]);
+    if (activeTab === "calendar") {
+      loadEvents();
+      loadDiscover();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTab]);
 
   // ---- Family member actions ----
   const handleAddPerson = async (e: React.FormEvent) => {
@@ -424,11 +600,18 @@ export default function CaregiverPage() {
                 </button>
               </div>
 
+              {/* Month calendar */}
+              <CalendarMonth
+                events={events}
+                onDayClick={handleCalendarDayClick}
+                onEventClick={handleCalendarEventClick}
+              />
+
               {/* Add event */}
               <div className="bg-white border rounded-2xl p-6 shadow-sm">
                 <h3 className="font-medium text-lg mb-2">Add an Event</h3>
                 <p className="text-zinc-500 text-sm mb-6">
-                  Medications repeat <b>every day</b> at the set time. Appointments &amp; family events happen <b>once</b> on a date. The patient&apos;s tablet gets a push notification at the time.
+                  Choose how often it repeats — <b>once</b>, <b>daily</b>, <b>weekly</b>, or <b>monthly</b>. The patient&apos;s tablet gets a push notification at the set time.
                 </p>
                 <form onSubmit={handleAddEvent} className="space-y-4 max-w-md">
                   <div className="flex gap-2">
@@ -436,7 +619,7 @@ export default function CaregiverPage() {
                       <button
                         type="button"
                         key={t}
-                        onClick={() => setEvType(t)}
+                        onClick={() => { setEvType(t); setEvRecurrence(t === "medication" ? "daily" : "once"); }}
                         className={`flex-1 capitalize rounded-lg py-2 text-sm font-medium border ${evType === t ? "bg-zinc-900 text-white" : "bg-zinc-50 text-zinc-600 hover:bg-zinc-100"}`}
                       >
                         {t === "medication" ? "💊 Medication" : t === "appointment" ? "📅 Appointment" : "👪 Family"}
@@ -457,14 +640,27 @@ export default function CaregiverPage() {
                     className="w-full border rounded-lg px-4 py-2 bg-zinc-50 focus:ring-2 outline-none"
                     placeholder={evType === "medication" ? "Note — e.g. Take 1 tablet with water" : "Note (optional)"}
                   />
-                  <div className="flex gap-3">
-                    <label className="flex-1 text-sm text-zinc-600">
+                  <div className="flex gap-3 flex-wrap">
+                    <label className="flex-1 text-sm text-zinc-600 min-w-[120px]">
+                      Repeats
+                      <select
+                        value={evRecurrence}
+                        onChange={(e) => setEvRecurrence(e.target.value as Recurrence)}
+                        className="mt-1 w-full border rounded-lg px-3 py-2 bg-zinc-50"
+                      >
+                        <option value="once">Once</option>
+                        <option value="daily">Every day</option>
+                        <option value="weekly">Every week</option>
+                        <option value="monthly">Every month</option>
+                      </select>
+                    </label>
+                    <label className="flex-1 text-sm text-zinc-600 min-w-[110px]">
                       Time
                       <input type="time" value={evTime} onChange={(e) => setEvTime(e.target.value)} className="mt-1 w-full border rounded-lg px-3 py-2 bg-zinc-50" />
                     </label>
-                    {evType !== "medication" && (
-                      <label className="flex-1 text-sm text-zinc-600">
-                        Date
+                    {evRecurrence !== "daily" && (
+                      <label className="flex-1 text-sm text-zinc-600 min-w-[140px]">
+                        {evRecurrence === "once" ? "Date" : "Starting"}
                         <input type="date" value={evDate} onChange={(e) => setEvDate(e.target.value)} className="mt-1 w-full border rounded-lg px-3 py-2 bg-zinc-50" />
                       </label>
                     )}
@@ -487,14 +683,67 @@ export default function CaregiverPage() {
                       <li key={ev.id} className="flex items-center justify-between border rounded-lg px-4 py-3">
                         <div>
                           <span className="font-medium">
-                            {ev.type === "medication" ? "💊" : ev.type === "appointment" ? "📅" : "👪"} {ev.title}
+                            {ev.type === "medication" ? "💊" : ev.type === "appointment" ? "📅" : ev.type === "activity" ? "🎟️" : "👪"} {ev.title}
                           </span>
                           <span className="text-zinc-500 text-sm ml-2">
-                            {ev.recurrence === "daily" ? `every day at ${ev.time}` : `${ev.date} at ${ev.time}`}
+                            {recurrenceLabel(ev)}
                           </span>
-                          {ev.notes && <div className="text-zinc-400 text-xs mt-0.5">{ev.notes}</div>}
+                          {ev.notes && <div className="text-zinc-400 text-xs mt-0.5 break-all">{ev.notes}</div>}
                         </div>
-                        <button onClick={() => deleteEvent(ev.id)} className="text-zinc-400 hover:text-red-600" title="Remove">✕</button>
+                        <button onClick={() => deleteEvent(ev.id)} className="text-zinc-400 hover:text-red-600 shrink-0" title="Remove">✕</button>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+
+              {/* Discover dementia events from Eventbrite */}
+              <div className="bg-white border rounded-2xl p-6 shadow-sm">
+                <div className="flex items-center justify-between mb-2 gap-3 flex-wrap">
+                  <h3 className="font-medium text-lg">🎟️ Discover dementia events</h3>
+                  <div className="flex items-center gap-2">
+                    <input
+                      value={discoverLocation}
+                      onChange={(e) => setDiscoverLocation(e.target.value)}
+                      onKeyDown={(e) => { if (e.key === "Enter") loadDiscover(); }}
+                      className="border rounded-lg px-3 py-1.5 text-sm bg-zinc-50 w-40"
+                      placeholder="online, toronto, …"
+                      title="Eventbrite location, e.g. online or a city"
+                    />
+                    <button onClick={loadDiscover} className="text-sm bg-zinc-900 text-white rounded-lg px-3 py-1.5 font-medium hover:bg-zinc-800">
+                      Search
+                    </button>
+                  </div>
+                </div>
+                <p className="text-zinc-500 text-sm mb-4">
+                  Public events from Eventbrite. Add any to the patient&apos;s calendar with one tap.
+                </p>
+                {discoverLoading ? (
+                  <p className="text-zinc-400 text-sm">Loading events…</p>
+                ) : discover.length === 0 ? (
+                  <p className="text-zinc-400 text-sm">No events found. Try a different location.</p>
+                ) : (
+                  <ul className="space-y-3">
+                    {discover.map((ev, i) => (
+                      <li key={ev.url || i} className="flex items-start justify-between gap-3 border rounded-xl p-4">
+                        <div className="min-w-0">
+                          <a href={ev.url} target="_blank" rel="noopener noreferrer" className="font-medium hover:underline">
+                            {ev.title}
+                          </a>
+                          <div className="text-zinc-500 text-sm mt-0.5">
+                            {ev.start ? new Date(ev.start).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" }) : "Date TBD"}
+                            {" · "}
+                            {ev.online ? "Online" : [ev.venue, ev.city].filter(Boolean).join(", ") || "In person"}
+                          </div>
+                          {ev.description && <div className="text-zinc-400 text-xs mt-1 line-clamp-2">{ev.description}</div>}
+                        </div>
+                        <button
+                          onClick={() => addDiscoveredEvent(ev)}
+                          className="shrink-0 bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-medium rounded-lg px-3 py-2"
+                          title="Add to the patient's calendar"
+                        >
+                          ➕ Add
+                        </button>
                       </li>
                     ))}
                   </ul>

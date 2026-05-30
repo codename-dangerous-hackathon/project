@@ -7,6 +7,7 @@
 //
 // All markup/logic is faithfully ported from hermes-agent/webchat/hermes-chat.html.
 import { useEffect, useRef } from "react";
+import Link from "next/link";
 
 // ===================== CONFIG =====================
 const BASE_URL = "/v1"; // proxied same-origin to Hermes (no CORS, no 403)
@@ -168,6 +169,15 @@ export default function HermesPage() {
           padding: 12px 16px; border-bottom: 1px solid var(--border);
           display: flex; align-items: center; gap: 10px; font-weight: 600;
         }
+        #hermes-chat .hc-back {
+          display: inline-flex; align-items: center; gap: 6px;
+          color: var(--text); text-decoration: none; font-weight: 600; font-size: 15px;
+          background: var(--bubble-bot); border: 1px solid var(--border);
+          border-radius: 10px; padding: 8px 14px; min-height: 44px;
+        }
+        #hermes-chat .hc-back:hover { background: #2c3240; }
+        #hermes-chat .hc-back:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+        #hermes-chat .hc-title { font-size: 18px; }
         #hermes-chat .hc-dot { width: 9px; height: 9px; border-radius: 50%; background: var(--muted); }
         #hermes-chat .hc-dot.ok { background: var(--accent); box-shadow: 0 0 8px var(--accent); }
         #hermes-chat .hc-header small { color: var(--muted); font-weight: 400; margin-left: auto; }
@@ -203,7 +213,11 @@ export default function HermesPage() {
 
       <div id="hermes-chat" ref={rootRef}>
         <div className="hc-header">
-          <span className="hc-dot" id="hc-status" /> Hermes
+          <Link href="/" className="hc-back" aria-label="Back to home">
+            <span aria-hidden="true">←</span> Back
+          </Link>
+          <span className="hc-dot" id="hc-status" aria-hidden="true" />
+          <span className="hc-title">Belong Text Companion</span>
           <small id="hc-model">hermes-agent</small>
         </div>
         <div className="hc-log" id="hc-log" />
@@ -211,7 +225,7 @@ export default function HermesPage() {
           <textarea
             id="hc-text"
             rows={1}
-            placeholder="Message Hermes…  (Enter to send, Shift+Enter for newline)"
+            placeholder="Message Belong…  (Enter to send, Shift+Enter for newline)"
           />
           <button id="hc-send">Send</button>
         </div>

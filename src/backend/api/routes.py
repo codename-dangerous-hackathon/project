@@ -7,6 +7,7 @@ from database.chroma_manager import vdb
 from tools.audio import transcribe_audio_local, synthesize_speech_local
 from tools.vision import extract_face_embedding_from_base64
 from services import reminders
+from services import eventbrite
 import uuid
 
 router = APIRouter()
@@ -230,6 +231,15 @@ async def create_event(request: EventRequest):
 async def delete_event(event_id: str):
     reminders.delete_event(event_id)
     return {"status": "deleted", "id": event_id}
+
+@router.get("/discover/events")
+async def discover_events(location: str = "online", q: str = "dementia", limit: int = 20):
+    """Public dementia-related events from Eventbrite (for the caregiver to browse
+    and add to the patient's calendar)."""
+    try:
+        return {"events": eventbrite.fetch_dementia_events(location, q, limit)}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 @router.get("/push/public_key")
 async def push_public_key():

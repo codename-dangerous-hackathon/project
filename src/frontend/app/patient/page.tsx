@@ -49,7 +49,7 @@ export default function PatientPage() {
 
   const openMemories = async () => {
     try {
-      const res = await fetch("/api/journal");
+      const res = await fetch("/api/journal", { cache: "no-store" });
       const data = await res.json();
       setPeople((data.people || []).filter((p: PersonGroup) => p.memories.length > 0));
       setGeneral(data.general || []);
@@ -331,7 +331,7 @@ export default function PatientPage() {
       {reminder && (
         <div className="absolute inset-0 z-30 bg-black/95 flex flex-col items-center justify-center p-8 text-center">
           <div className="text-8xl mb-6">
-            {reminder.type === "medication" ? "💊" : reminder.type === "appointment" ? "📅" : reminder.type === "family" ? "👪" : "🔔"}
+            {reminder.type === "medication" ? "💊" : reminder.type === "appointment" ? "📅" : reminder.type === "activity" ? "🎟️" : reminder.type === "family" ? "👪" : "🔔"}
           </div>
           <h2 className="text-5xl md:text-6xl font-semibold text-white mb-4 max-w-3xl leading-tight">
             {reminder.title}

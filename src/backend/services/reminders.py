@@ -127,6 +127,8 @@ def _payload_for(e: dict) -> dict:
         heading = f"💊 Time for your {title}"
     elif t == "appointment":
         heading = f"📅 {title}"
+    elif t == "activity":
+        heading = f"🎟️ {title}"
     else:
         heading = f"👪 {title}"
     return {
@@ -138,19 +140,34 @@ def _payload_for(e: dict) -> dict:
     }
 
 
+def _occurs_on(e: dict, now: datetime) -> bool:
+    """Whether event `e` should fire on the calendar day of `now`."""
+    rec = e.get("recurrence") or "once"
+    if rec == "daily":
+        return True
+    d = e.get("date") or ""
+    if not d:
+        return False
+    try:
+        ed = datetime.strptime(d, "%Y-%m-%d").date()
+    except ValueError:
+        return False
+    today = now.date()
+    if ed > today:  # recurrence hasn't started yet
+        return False
+    if rec == "once":
+        return ed == today
+    if rec == "weekly":
+        return ed.weekday() == today.weekday()
+    if rec == "monthly":
+        return ed.day == today.day
+    return ed == today
+
+
 def due_events(now: datetime = None):
     now = now or datetime.now()
-    today = now.strftime("%Y-%m-%d")
     hhmm = now.strftime("%H:%M")
-    out = []
-    for e in list_events():
-        if e.get("time") != hhmm:
-            continue
-        if e.get("recurrence") == "daily":
-            out.append(e)
-        elif e.get("date") == today:
-            out.append(e)
-    return out
+    return [e for e in list_events() if e.get("time") == hhmm and _occurs_on(e, now)]
 
 
 def tick(now: datetime = None):

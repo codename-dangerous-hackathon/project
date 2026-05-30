@@ -367,6 +367,17 @@ test.describe("Backend API contract (via /api proxy)", () => {
     const after = await (await request.get("/api/events")).json();
     expect(after.events.some((e: { id: string }) => e.id === ev.id)).toBe(false);
   });
+
+  test("GET /api/discover/events returns Eventbrite dementia events", async ({ request }) => {
+    const r = await request.get("/api/discover/events?limit=5", { timeout: 30_000 });
+    expect(r.status()).toBe(200);
+    const data = await r.json();
+    expect(Array.isArray(data.events)).toBe(true);
+    expect(data.events.length).toBeGreaterThan(0);
+    expect(data.events[0]).toHaveProperty("title");
+    expect(data.events[0]).toHaveProperty("url");
+    expect(data.events[0].url).toContain("eventbrite");
+  });
 });
 
 test.describe("Stored data views (verify what's saved)", () => {
@@ -407,13 +418,61 @@ test.describe("Stored data views (verify what's saved)", () => {
     await page.getByRole("button", { name: "Add to Calendar" }).click();
 
     await expect(page.getByText(/Reminds every day at/)).toBeVisible();
-    await expect(page.getByText(title)).toBeVisible();
+    // The event now appears both in the month calendar and the scheduled list.
+    await expect(page.getByText(title).first()).toBeVisible();
     await page.screenshot({ path: `${SHOTS}/09-caregiver-calendar.png`, fullPage: true });
 
     // cleanup
     const list = await (await request.get("/api/events")).json();
     const ev = (list.events as { id: string; title: string }[]).find((e) => e.title === title);
     if (ev) await request.delete(`/api/events/${ev.id}`);
+  });
+
+  test("Caregiver Calendar: add a WEEKLY event and delete it via the list", async ({
+    page,
+  }) => {
+    await page.goto("/caregiver");
+    await page.getByRole("button", { name: "Calendar" }).click();
+
+    await page.getByRole("button", { name: "📅 Appointment" }).click();
+    await page.locator("select").selectOption("weekly");
+    const title = `Weekly Visit ${Date.now()}`;
+    await page.getByPlaceholder(/Title/).fill(title);
+    await page.locator('input[type="date"]').fill("2026-06-01");
+    await page.getByRole("button", { name: "Add to Calendar" }).click();
+
+    await expect(page.getByText(/Reminds every week/)).toBeVisible();
+    await expect(page.getByText(title).first()).toBeVisible();
+
+    // Delete via the ✕ in the Scheduled list — must actually remove it.
+    await page.locator("li", { hasText: title }).getByRole("button", { name: "✕" }).first().click();
+    await expect(page.getByText(title)).toHaveCount(0);
+  });
+
+  test("Caregiver Discover: browse Eventbrite dementia events and add one to the calendar", async ({
+    page,
+    request,
+  }) => {
+    await page.goto("/caregiver");
+    await page.getByRole("button", { name: "Calendar" }).click();
+    await expect(
+      page.getByRole("heading", { name: /Discover dementia events/ })
+    ).toBeVisible();
+
+    const addBtn = page.getByRole("button", { name: "➕ Add" }).first();
+    await expect(addBtn).toBeVisible({ timeout: 30_000 });
+    await addBtn.click();
+
+    await expect(page.getByText(/Added .* to the calendar/)).toBeVisible();
+    await page.screenshot({ path: `${SHOTS}/11-caregiver-discover.png`, fullPage: true });
+
+    // The added activity event is now scheduled.
+    const list = await (await request.get("/api/events")).json();
+    const activities = (list.events as { id: string; type: string }[]).filter(
+      (e) => e.type === "activity"
+    );
+    expect(activities.length).toBeGreaterThan(0);
+    for (const a of activities) await request.delete(`/api/events/${a.id}`); // cleanup
   });
 
   test("Patient reminder card shows from a notification payload + can be dismissed", async ({
