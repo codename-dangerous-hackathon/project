@@ -21,7 +21,7 @@ test.describe("Landing page", () => {
     await page.screenshot({ path: `${SHOTS}/01-home.png`, fullPage: true });
 
     // Patient link
-    await page.getByRole("link", { name: "Open Companion (Patient)" }).click();
+    await page.getByRole("link", { name: "Belong Voice Companion (Patient)" }).click();
     await expect(page).toHaveURL(/\/patient$/);
 
     // Caregiver link
@@ -290,10 +290,12 @@ test.describe("Backend API contract (via /api proxy)", () => {
 
   test("POST /api/enroll_memory writes to the vault", async ({ request }) => {
     const r = await request.post("/api/enroll_memory", {
-      data: { text: "API smoke-test memory", tags: "life-story" },
+      data: { text: `smoke-test ${Date.now()}`, tags: "life-story" },
     });
     expect(r.status()).toBe(200);
-    expect((await r.json()).status).toBe("success");
+    const body = await r.json();
+    expect(body.status).toBe("success");
+    await request.delete(`/api/memories/${body.memory_id}`); // don't leave junk in the vault
   });
 
   test("POST /api/synthesize returns real WAV audio (not the 44-byte mock)", async ({
@@ -366,6 +368,47 @@ test.describe("Backend API contract (via /api proxy)", () => {
     await request.delete(`/api/events/${ev.id}`);
     const after = await (await request.get("/api/events")).json();
     expect(after.events.some((e: { id: string }) => e.id === ev.id)).toBe(false);
+  });
+
+  test("patient profile round-trips and the companion knows the patient's name", async ({
+    request,
+  }) => {
+    const orig = await (await request.get("/api/profile")).json();
+    const name = "TestPatientZed";
+    try {
+      const s = await request.post("/api/profile", { data: { name, tagline: "loves the sea" } });
+      expect(s.status()).toBe(200);
+      expect((await s.json()).name).toBe(name);
+      expect((await (await request.get("/api/profile")).json()).name).toBe(name);
+
+      const r = await request.post("/api/ask", {
+        data: { user_input: "What is my name?" },
+        timeout: 60_000,
+      });
+      expect((await r.json()).reply).toContain(name);
+    } finally {
+      await request.post("/api/profile", {
+        data: { name: orig.name, tagline: orig.tagline, photo: orig.photo },
+      });
+    }
+  });
+
+  test("companion is aware of the calendar (medications/schedule)", async ({ request }) => {
+    // Add a distinctively-named medication...
+    const c = await request.post("/api/events", {
+      data: { type: "medication", title: "Zorbex", notes: "1 tablet", time: "08:00", recurrence: "daily" },
+    });
+    const id = (await c.json()).id;
+    try {
+      const r = await request.post("/api/ask", {
+        data: { user_input: "What medications do I take?" },
+        timeout: 60_000,
+      });
+      expect(r.status()).toBe(200);
+      expect((await r.json()).reply.toLowerCase()).toContain("zorbex");
+    } finally {
+      await request.delete(`/api/events/${id}`);
+    }
   });
 
   test("GET /api/discover/events returns Eventbrite dementia events", async ({ request }) => {
@@ -473,6 +516,32 @@ test.describe("Stored data views (verify what's saved)", () => {
     );
     expect(activities.length).toBeGreaterThan(0);
     for (const a of activities) await request.delete(`/api/events/${a.id}`); // cleanup
+  });
+
+  test("Patient About Me shows the patient's identity (name + story)", async ({
+    page,
+    request,
+  }) => {
+    const orig = await (await request.get("/api/profile")).json();
+    try {
+      await request.post("/api/profile", {
+        data: { name: "Helen", tagline: "You love gardening and Earl Grey tea." },
+      });
+      await page.goto("/patient");
+      await page.getByRole("button", { name: "About Me" }).click();
+
+      await expect(page.getByRole("heading", { name: "About You", exact: true })).toBeVisible();
+      await expect(page.getByText("This is you")).toBeVisible();
+      await expect(page.getByRole("heading", { name: "Helen" })).toBeVisible();
+      await page.screenshot({ path: `${SHOTS}/12-patient-about.png`, fullPage: true });
+
+      await page.getByRole("button", { name: "Close" }).click();
+      await expect(page.getByRole("heading", { name: "About You", exact: true })).not.toBeVisible();
+    } finally {
+      await request.post("/api/profile", {
+        data: { name: orig.name, tagline: orig.tagline, photo: orig.photo },
+      });
+    }
   });
 
   test("Patient reminder card shows from a notification payload + can be dismissed", async ({

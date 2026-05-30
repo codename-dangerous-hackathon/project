@@ -8,6 +8,7 @@ from tools.audio import transcribe_audio_local, synthesize_speech_local
 from tools.vision import extract_face_embedding_from_base64
 from services import reminders
 from services import eventbrite
+from services import profile
 import uuid
 
 router = APIRouter()
@@ -52,6 +53,11 @@ class EventRequest(BaseModel):
     time: str                       # "HH:MM" (24h)
     date: Optional[str] = ""        # "YYYY-MM-DD" for one-off events
     recurrence: Optional[str] = "once"  # "daily" for medications, else "once"
+
+class ProfileRequest(BaseModel):
+    name: Optional[str] = None
+    tagline: Optional[str] = None
+    photo: Optional[str] = None  # base64 data URL (the patient's own photo)
 
 class PersonMemoryRequest(BaseModel):
     text: str
@@ -261,6 +267,14 @@ async def push_test():
         "event_title": "Test",
     })
     return {"sent": sent}
+
+@router.get("/profile")
+async def get_patient_profile():
+    return profile.get_profile()
+
+@router.post("/profile")
+async def update_patient_profile(request: ProfileRequest):
+    return profile.save_profile(request.model_dump(exclude_none=True))
 
 @router.get("/journal")
 async def journal():

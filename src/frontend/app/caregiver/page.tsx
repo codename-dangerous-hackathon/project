@@ -271,6 +271,40 @@ export default function CaregiverPage() {
     }
   };
 
+  // Patient profile ("About Me")
+  const [profileName, setProfileName] = useState("");
+  const [profileTagline, setProfileTagline] = useState("");
+  const [profilePhoto, setProfilePhoto] = useState("");
+  const [profileStatus, setProfileStatus] = useState("");
+
+  const loadProfile = useCallback(async () => {
+    try {
+      const res = await fetch("/api/profile", { cache: "no-store" });
+      const p = await res.json();
+      setProfileName(p.name || "");
+      setProfileTagline(p.tagline || "");
+      setProfilePhoto(p.photo || "");
+    } catch {
+      /* offline */
+    }
+  }, []);
+
+  const saveProfile = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setProfileStatus("Saving…");
+    try {
+      await fetch("/api/profile", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: profileName, tagline: profileTagline, photo: profilePhoto }),
+      });
+      setProfileStatus("✅ Saved.");
+      setTimeout(() => setProfileStatus(""), 2500);
+    } catch {
+      setProfileStatus("❌ Could not save.");
+    }
+  };
+
   // Add-person form
   const [pName, setPName] = useState("");
   const [pRel, setPRel] = useState("");
@@ -299,6 +333,7 @@ export default function CaregiverPage() {
 
   useEffect(() => {
     if (activeTab === "family" || activeTab === "notes") load();
+    if (activeTab === "notes") loadProfile();
     if (activeTab === "calendar") {
       loadEvents();
       loadDiscover();
@@ -755,7 +790,48 @@ export default function CaregiverPage() {
           {/* PATIENT NOTES (general) */}
           {activeTab === "notes" && (
             <div className="space-y-6">
-              <h2 className="text-3xl font-semibold tracking-tight border-b pb-4">Patient Notes</h2>
+              <h2 className="text-3xl font-semibold tracking-tight border-b pb-4">About the Patient</h2>
+
+              {/* Patient profile — shown on the patient's "About Me" screen */}
+              <div className="bg-white border rounded-2xl p-6 shadow-sm">
+                <h3 className="font-medium text-lg mb-2">Identity (shown on their &ldquo;About Me&rdquo; screen)</h3>
+                <p className="text-zinc-500 text-sm mb-6">
+                  Their name, photo, and a warm one-line description — so the patient can re-anchor on who they are.
+                </p>
+                <form onSubmit={saveProfile} className="space-y-4 max-w-md">
+                  <input
+                    type="text"
+                    value={profileName}
+                    onChange={(e) => setProfileName(e.target.value)}
+                    className="w-full border rounded-lg px-4 py-2 bg-zinc-50 focus:ring-2 outline-none"
+                    placeholder="Name — e.g. Helen"
+                  />
+                  <input
+                    type="text"
+                    value={profileTagline}
+                    onChange={(e) => setProfileTagline(e.target.value)}
+                    className="w-full border rounded-lg px-4 py-2 bg-zinc-50 focus:ring-2 outline-none"
+                    placeholder="A warm line — e.g. You are a mother of three who loves gardening."
+                  />
+                  <div>
+                    <label className="block text-sm font-medium mb-1 text-zinc-600">Photo (optional)</label>
+                    {profilePhoto && (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img src={profilePhoto} alt="patient" className="w-20 h-20 rounded-full object-cover mb-2 border" />
+                    )}
+                    <input
+                      type="file"
+                      accept="image/*"
+                      onChange={async (e) => { const f = e.target.files?.[0]; if (f) setProfilePhoto(await fileToBase64(f)); }}
+                      className="w-full border rounded-lg px-4 py-2 bg-zinc-50 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-zinc-900 file:text-white"
+                    />
+                  </div>
+                  <button type="submit" className="bg-zinc-900 text-white font-medium px-6 py-3 rounded-lg hover:bg-zinc-800 transition-colors">
+                    Save Profile
+                  </button>
+                  {profileStatus && <span className="text-sm font-medium text-emerald-600 ml-3">{profileStatus}</span>}
+                </form>
+              </div>
               <div className="bg-white border rounded-2xl p-6 shadow-sm">
                 <h3 className="font-medium text-lg mb-2">General facts about the patient</h3>
                 <p className="text-zinc-500 text-sm mb-6">

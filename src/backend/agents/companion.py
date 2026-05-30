@@ -1,5 +1,8 @@
 import os
+from datetime import datetime
 from database.chroma_manager import vdb
+from services import reminders
+from services import profile
 
 # Pseudo-code / NIM API compatibility setup setup
 # Assuming standard OpenAI formatting to hit a local NVIDIA NIM endpoint
@@ -69,15 +72,28 @@ def ask_companion(user_input: str, history=None) -> str:
     history: optional list of {"role": "user"|"assistant", "content": str} from
     earlier in this conversation, so the companion can actually follow along.
     """
-    # 1. Build grounding context: the known family roster + relevant memories.
+    # 1. Build grounding context: today's date, family roster, the schedule, memories.
+    now = datetime.now()
     family = build_family_context()
+    calendar = reminders.calendar_summary(now)
     rag_context = fetch_revelant_memories(user_input)
-    parts = []
+    parts = [f"RIGHT NOW IT IS {now.strftime('%A, %B %d, %Y, at %I:%M %p')}."]
+    prof = profile.get_profile()
+    if prof.get("name"):
+        who = f"YOU ARE SPEAKING WITH THE PATIENT, whose name is {prof['name']}"
+        if prof.get("tagline"):
+            who += f". About them: {prof['tagline']}"
+        parts.append(who + ".")
     if family:
         parts.append("KNOWN FAMILY MEMBERS (the only people you may name):\n" + family)
+    if calendar:
+        parts.append(
+            "THE PATIENT'S SCHEDULE — use this to answer anything about medications, "
+            "appointments, events, or what is happening today/this week:\n" + calendar
+        )
     if rag_context:
         parts.append("OTHER NOTES ABOUT THE PATIENT: " + rag_context)
-    context_injection = ("\n\n" + "\n\n".join(parts) + "\n") if parts else ""
+    context_injection = "\n\n" + "\n\n".join(parts) + "\n"
 
     # 2. Build the enhanced prompt
     messages = [{"role": "system", "content": SYSTEM_PROMPT + context_injection}]

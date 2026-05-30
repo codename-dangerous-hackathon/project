@@ -77,6 +77,33 @@ export default function PatientPage() {
     }
   };
 
+  // --- About Me (who you are: name, photo, your story, your family) ---
+  type Person = { id: string; name: string; relationship: string };
+  const [aboutOpen, setAboutOpen] = useState(false);
+  const [profile, setProfile] = useState<{ name?: string; tagline?: string; photo?: string }>({});
+  const [aboutPeople, setAboutPeople] = useState<Person[]>([]);
+  const [aboutGeneral, setAboutGeneral] = useState<Mem[]>([]);
+
+  const openAbout = async () => {
+    let prof: { name?: string; tagline?: string; photo?: string } = {};
+    try {
+      const [p, j] = await Promise.all([
+        fetch("/api/profile", { cache: "no-store" }).then((r) => r.json()),
+        fetch("/api/journal", { cache: "no-store" }).then((r) => r.json()),
+      ]);
+      prof = p || {};
+      setProfile(prof);
+      setAboutPeople(j.people || []);
+      setAboutGeneral(j.general || []);
+    } catch {
+      setProfile({});
+      setAboutPeople([]);
+      setAboutGeneral([]);
+    }
+    setAboutOpen(true);
+    if (prof.name) speakText(`You are ${prof.name}.${prof.tagline ? " " + prof.tagline : ""}`);
+  };
+
   // --- Reminders (medication / appointment / family push notifications) ---
   type Reminder = { title?: string; body?: string; type?: string };
   const [reminder, setReminder] = useState<Reminder | null>(null);
@@ -394,20 +421,92 @@ export default function PatientPage() {
       )}
 
       {/* Secondary Actions Row */}
-      <div className="flex gap-6 mt-16 w-full max-w-2xl justify-center">
-        <button 
+      <div className="flex flex-wrap gap-4 mt-16 w-full max-w-3xl justify-center">
+        <button
+          onClick={openAbout}
+          className="flex-1 min-w-[150px] bg-zinc-800 hover:bg-zinc-700 rounded-3xl py-8 text-2xl md:text-3xl font-medium transition-transform active:scale-95 border border-zinc-700"
+        >
+          👤 About Me
+        </button>
+        <button
           onClick={handleIdentify}
-          className="flex-1 bg-zinc-800 hover:bg-zinc-700 rounded-3xl py-8 text-2xl md:text-3xl font-medium transition-transform active:scale-95 border border-zinc-700"
+          className="flex-1 min-w-[150px] bg-zinc-800 hover:bg-zinc-700 rounded-3xl py-8 text-2xl md:text-3xl font-medium transition-transform active:scale-95 border border-zinc-700"
         >
           {status === "camera" ? "👁️ Identify Face" : "📷 Who is this?"}
         </button>
         <button
           onClick={openMemories}
-          className="flex-1 bg-zinc-800 hover:bg-zinc-700 rounded-3xl py-8 text-2xl md:text-3xl font-medium transition-transform active:scale-95 border border-zinc-700"
+          className="flex-1 min-w-[150px] bg-zinc-800 hover:bg-zinc-700 rounded-3xl py-8 text-2xl md:text-3xl font-medium transition-transform active:scale-95 border border-zinc-700"
         >
           📖 Memories
         </button>
       </div>
+
+      {/* About Me overlay — who you are */}
+      {aboutOpen && (
+        <div className="absolute inset-0 z-20 bg-black/95 flex flex-col p-6 overflow-y-auto">
+          <div className="flex items-center justify-between mb-6 max-w-2xl mx-auto w-full">
+            <h2 className="text-3xl md:text-4xl font-medium text-zinc-200">About You</h2>
+            <button
+              onClick={() => setAboutOpen(false)}
+              className="text-zinc-200 bg-zinc-800 hover:bg-zinc-700 rounded-full px-6 py-3 text-xl"
+            >
+              Close
+            </button>
+          </div>
+          <div className="max-w-2xl mx-auto w-full space-y-8 pb-10">
+            <div className="text-center">
+              {profile.photo && (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img
+                  src={profile.photo}
+                  alt="You"
+                  className="w-44 h-44 rounded-full object-cover mx-auto border-4 border-zinc-700 mb-5"
+                />
+              )}
+              <p className="text-zinc-400 text-xl">This is you</p>
+              <h3 className="text-5xl md:text-6xl font-semibold text-white mt-1">
+                {profile.name || "You"}
+              </h3>
+              {profile.tagline && (
+                <p className="text-2xl text-zinc-300 mt-3">{profile.tagline}</p>
+              )}
+            </div>
+
+            {aboutGeneral.length > 0 && (
+              <div className="space-y-3">
+                <h4 className="text-2xl font-semibold text-amber-300">A little about you</h4>
+                {aboutGeneral.map((m) => (
+                  <button
+                    key={m.id}
+                    onClick={() => speakText(m.text)}
+                    className="w-full text-left bg-zinc-900 hover:bg-zinc-800 border border-zinc-700 rounded-2xl p-6 text-2xl text-zinc-100 leading-relaxed transition-colors"
+                  >
+                    {m.text}
+                    <span className="block text-zinc-500 text-base mt-3">🔊 Tap to hear this</span>
+                  </button>
+                ))}
+              </div>
+            )}
+
+            {aboutPeople.length > 0 && (
+              <div className="space-y-3">
+                <h4 className="text-2xl font-semibold text-amber-300">Your family</h4>
+                {aboutPeople.map((p) => (
+                  <button
+                    key={p.id}
+                    onClick={() => speakText(`This is ${p.name}, your ${p.relationship}.`)}
+                    className="w-full text-left bg-zinc-900 hover:bg-zinc-800 border border-zinc-700 rounded-2xl p-6 text-2xl text-zinc-100 transition-colors"
+                  >
+                    {p.name} <span className="text-zinc-400">— your {p.relationship}</span>
+                    <span className="block text-zinc-500 text-base mt-2">🔊 Tap to hear this</span>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* Memories overlay — tap any memory to hear it read aloud */}
       {memoriesOpen && (

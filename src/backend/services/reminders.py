@@ -12,7 +12,7 @@ import os
 import threading
 import time
 import uuid
-from datetime import datetime
+from datetime import datetime, timedelta
 
 _BASE = os.path.dirname(os.path.dirname(__file__))  # src/backend
 _DATA = os.path.join(_BASE, "data")
@@ -168,6 +168,62 @@ def due_events(now: datetime = None):
     now = now or datetime.now()
     hhmm = now.strftime("%H:%M")
     return [e for e in list_events() if e.get("time") == hhmm and _occurs_on(e, now)]
+
+
+def _sched_phrase(e: dict) -> str:
+    r = e.get("recurrence") or "once"
+    t = e.get("time", "")
+    d = e.get("date") or ""
+    if r == "daily":
+        return f"every day at {t}"
+    if d:
+        try:
+            dt = datetime.strptime(d, "%Y-%m-%d")
+            if r == "weekly":
+                return f"every {dt.strftime('%A')} at {t}"
+            if r == "monthly":
+                return f"on day {dt.day} of each month at {t}"
+        except ValueError:
+            pass
+    if r in ("weekly", "monthly"):
+        return f"{r} at {t}"
+    return f"on {d} at {t}"
+
+
+def calendar_summary(now: datetime = None) -> str:
+    """A readable summary of the patient's schedule, for the Companion's context."""
+    now = now or datetime.now()
+    events = list_events()
+    if not events:
+        return ""
+    lines = []
+    meds = [e for e in events if e.get("type") == "medication"]
+    if meds:
+        lines.append("Medications to take:")
+        for m in meds:
+            note = f" — {m['notes']}" if m.get("notes") else ""
+            lines.append(f"  - {m.get('title', '')} {_sched_phrase(m)}{note}")
+    todays = [e for e in events if e.get("type") != "medication" and _occurs_on(e, now)]
+    if todays:
+        lines.append("Today:")
+        for e in todays:
+            note = f" — {e['notes']}" if e.get("notes") else ""
+            lines.append(f"  - {e.get('title', '')} at {e.get('time', '')}{note}")
+    upcoming = []
+    for e in events:
+        if e.get("type") == "medication":
+            continue
+        for delta in range(1, 8):
+            day = now + timedelta(days=delta)
+            if _occurs_on(e, day):
+                upcoming.append((day, e))
+                break
+    upcoming.sort(key=lambda x: x[0])
+    if upcoming:
+        lines.append("Coming up this week:")
+        for day, e in upcoming[:5]:
+            lines.append(f"  - {e.get('title', '')} on {day.strftime('%A %B %d')} at {e.get('time', '')}")
+    return "\n".join(lines)
 
 
 def tick(now: datetime = None):
