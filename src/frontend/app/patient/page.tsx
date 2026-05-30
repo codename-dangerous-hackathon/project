@@ -11,6 +11,15 @@ export default function PatientPage() {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
 
+  // Attach the camera stream once the <video> element is actually mounted.
+  // The video is only rendered when status === "camera", so we cannot assign
+  // srcObject inside startCamera (the element doesn't exist yet at that point).
+  useEffect(() => {
+    if (status === "camera" && videoRef.current && streamRef.current) {
+      videoRef.current.srcObject = streamRef.current;
+    }
+  }, [status]);
+
   // Mock Handle Talk Button
   const handleTalk = async () => {
     if (status === "camera") stopCamera();
@@ -67,9 +76,7 @@ export default function PatientPage() {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } });
       streamRef.current = stream;
-      if (videoRef.current) {
-        videoRef.current.srcObject = stream;
-      }
+      // The effect above attaches the stream to the <video> once it mounts.
       setStatus("camera");
       setSubtitle("Point the camera at them.");
     } catch (err) {
