@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useRef, useEffect } from "react";
+import Link from "next/link";
 
 export default function PatientPage() {
   const [status, setStatus] = useState<"idle" | "listening" | "speaking" | "camera">("idle");
@@ -138,8 +139,13 @@ export default function PatientPage() {
   };
 
   return (
-    <main className="flex flex-col items-center justify-center min-h-[100dvh] bg-black text-white p-4 font-sans select-none">
+    <main className="flex flex-col items-center justify-center min-h-[100dvh] bg-black text-white p-4 font-sans select-none relative">
       
+      {/* Subtle Home Button in Top Left */}
+      <Link href="/" className="absolute top-6 left-6 p-3 text-zinc-600 hover:text-zinc-300 transition-colors bg-zinc-900/50 hover:bg-zinc-800 rounded-full" title="Back to Home">
+        <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
+      </Link>
+
       {/* Dynamic Header */}
       <h1 className="text-4xl md:text-5xl font-medium text-center text-zinc-300 mb-8 max-w-2xl px-4 min-h-[5rem]">
         {subtitle}

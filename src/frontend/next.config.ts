@@ -1,6 +1,7 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
+  allowedDevOrigins: ["gx10-5442.tail72d5cd.ts.net"],
   async rewrites() {
     return [
       {

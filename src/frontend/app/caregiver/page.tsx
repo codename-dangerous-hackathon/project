@@ -2,6 +2,8 @@
 
 import { useState } from "react";
 
+import Link from "next/link";
+
 export default function CaregiverPage() {
   const [activeTab, setActiveTab] = useState<"dashboard" | "faces" | "memories">("dashboard");
   const [memoryText, setMemoryText] = useState("");
@@ -33,9 +35,14 @@ export default function CaregiverPage() {
       {/* Header */}
       <header className="bg-zinc-900 text-white p-6 shadow-md">
         <div className="max-w-5xl mx-auto flex items-center justify-between">
-          <div>
-            <h1 className="text-2xl font-bold tracking-tight">Anchor Caregiver UI</h1>
-            <p className="text-zinc-400 text-sm mt-1">100% On-Device Family Portal</p>
+          <div className="flex items-center gap-4">
+            <Link href="/" className="bg-zinc-800 hover:bg-zinc-700 text-zinc-300 p-2 rounded-lg transition-colors" title="Back to Home">
+              <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
+            </Link>
+            <div>
+              <h1 className="text-2xl font-bold tracking-tight">Anchor Caregiver UI</h1>
+              <p className="text-zinc-400 text-sm mt-1">100% On-Device Family Portal</p>
+            </div>
           </div>
           <div className="flex gap-2">
             <span className="bg-emerald-500/20 text-emerald-400 border border-emerald-500/50 px-3 py-1 rounded-full text-xs font-medium flex items-center gap-2">
