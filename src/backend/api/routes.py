@@ -5,9 +5,15 @@ from typing import List, Optional
 from agents.companion import ask_companion
 from database.chroma_manager import vdb
 from tools.audio import transcribe_audio_local, synthesize_speech_local
+from tools.vision import extract_face_embedding_from_base64
 import uuid
 
 router = APIRouter()
+
+# Minimum cosine similarity (1 - Chroma cosine distance) to count as the same
+# person. buffalo_l/ArcFace gives ~0.5+ for the same face and <0.2 for
+# different faces, so 0.35 is a comfortable, conservative cut.
+FACE_MATCH_THRESHOLD = 0.35
 
 class AskRequest(BaseModel):
     user_input: str
@@ -16,6 +22,12 @@ class EnrollMemoryRequest(BaseModel):
     text: str
     date: Optional[str] = None
     tags: Optional[str] = None
+
+class EnrollFaceRequest(BaseModel):
+    name: str
+    relationship: str
+    # Base64 (raw or data: URL) of the caregiver-uploaded photo.
+    image_base64: str
 
 class IdentifyRequest(BaseModel):
     # Base64 string of the captured image from the UI
@@ -33,29 +45,60 @@ async def ask_endpoint(request: AskRequest):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+@router.post("/enroll")
+async def enroll_face(request: EnrollFaceRequest):
+    """
+    Caregiver App: enroll a family member from a photo. The local InsightFace
+    model turns the photo into a 512-d embedding which is stored in the Vector
+    DB; the original photo is never persisted (privacy by design).
+    """
+    try:
+        embedding = extract_face_embedding_from_base64(request.image_base64)
+        if embedding is None:
+            return {
+                "status": "no_face",
+                "message": "No clear face detected. Please use a well-lit, front-facing photo.",
+            }
+        person_id = str(uuid.uuid4())
+        vdb.add_face_embedding(
+            person_id=person_id,
+            embedding=embedding,
+            metadata={"name": request.name, "relationship": request.relationship},
+        )
+        return {"status": "success", "person_id": person_id, "name": request.name}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
 @router.post("/identify")
 async def identify_person(request: IdentifyRequest):
     """
-    Match camera frame to enrolled embeddings in Vector DB.
+    Match a live camera frame against enrolled face embeddings in the Vector DB.
     """
     try:
-        # MOCK PIPELINE: In reality, we'd pass image_base64 to a local InsightFace model here to get `embedding_query`
-        # embedding_query = local_vision_model.extract(request.image_base64)
-        mock_embedding = [0.1, 0.2, 0.3] # Placeholder
+        embedding = extract_face_embedding_from_base64(request.image_base64)
+        if embedding is None:
+            return {"match": False, "message": "I can't see a face clearly right now."}
 
-        # Here we query the ChromaDB
-        results = vdb.recognize_face(embedding_query=mock_embedding)
-        
-        # MOCK RETURN: Let's assume we matched someone to test the UI flow
-        return {"match": True, "name": "Sarah", "relationship": "daughter"}
-        
-        # Real logic would trigger:
-        # if results['distances'] and len(results['distances'][0]) > 0:
-        #     if results['distances'][0][0] < 0.5: 
-        #         meta = results['metadatas'][0][0]
-        #         return {"match": True, "name": meta.get("name"), "relationship": meta.get("relationship")}
-        # return {"match": False, "message": "Unknown face"}
-        
+        if vdb.face_collection.count() == 0:
+            return {"match": False, "message": "No family members have been enrolled yet."}
+
+        results = vdb.recognize_face(embedding_query=embedding, n_results=1)
+        distances = results.get("distances") or [[]]
+        metadatas = results.get("metadatas") or [[]]
+
+        if distances[0]:
+            # Chroma cosine distance = 1 - cosine similarity.
+            similarity = 1.0 - distances[0][0]
+            if similarity >= FACE_MATCH_THRESHOLD:
+                meta = metadatas[0][0]
+                return {
+                    "match": True,
+                    "name": meta.get("name"),
+                    "relationship": meta.get("relationship"),
+                    "confidence": round(similarity, 3),
+                }
+
+        return {"match": False, "message": "I don't recognize this person yet."}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

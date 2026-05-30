@@ -9,6 +9,68 @@ export default function CaregiverPage() {
   const [memoryText, setMemoryText] = useState("");
   const [enrollStatus, setEnrollStatus] = useState("");
 
+  // Face enrollment state
+  const [faceName, setFaceName] = useState("");
+  const [faceRelationship, setFaceRelationship] = useState("");
+  const [facePhoto, setFacePhoto] = useState<string>(""); // base64 data URL
+  const [faceStatus, setFaceStatus] = useState("");
+  const [faceSaving, setFaceSaving] = useState(false);
+
+  const onPhotoSelected = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => setFacePhoto(typeof reader.result === "string" ? reader.result : "");
+    reader.readAsDataURL(file);
+  };
+
+  const handleEnrollFace = async (e: React.FormEvent) => {
+    e.preventDefault();
+    // Validate in JS (not via the `required` attribute) so the button always
+    // gives visible feedback instead of silently failing browser validation.
+    if (!faceName.trim() || !faceRelationship.trim()) {
+      setFaceStatus("⚠️ Please enter both a name and a relationship.");
+      return;
+    }
+    if (!facePhoto) {
+      setFaceStatus("⚠️ Please choose a clear photo first.");
+      return;
+    }
+    setFaceSaving(true);
+    setFaceStatus("Extracting face embedding on-device...");
+    try {
+      const res = await fetch("/api/enroll", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: faceName,
+          relationship: faceRelationship,
+          image_base64: facePhoto,
+        }),
+      });
+      let data: { status?: string; name?: string; message?: string } | null = null;
+      try {
+        data = await res.json();
+      } catch {
+        /* non-JSON error body */
+      }
+      if (res.ok && data?.status === "success") {
+        setFaceStatus(`✅ ${data.name} enrolled. Photo discarded — only the embedding was kept.`);
+        setFaceName("");
+        setFaceRelationship("");
+        setFacePhoto("");
+      } else if (data?.status === "no_face") {
+        setFaceStatus(`⚠️ ${data.message}`);
+      } else {
+        setFaceStatus(`❌ Failed to enroll (HTTP ${res.status}). Please try again.`);
+      }
+    } catch {
+      setFaceStatus("❌ Backend is offline. Is FastAPI running?");
+    } finally {
+      setFaceSaving(false);
+    }
+  };
+
   const handleEnrollMemory = async (e: React.FormEvent) => {
     e.preventDefault();
     setEnrollStatus("Saving to Vector DB...");
@@ -114,22 +176,46 @@ export default function CaregiverPage() {
                 <p className="text-zinc-500 text-sm mb-6">
                   Add photos of loved ones. The local InsightFace model will process the image into a secure embedding array. The original photo is discarded, maintaining privacy.
                 </p>
-                <form className="space-y-4 max-w-md">
+                <form onSubmit={handleEnrollFace} className="space-y-4 max-w-md">
                   <div>
                     <label className="block text-sm font-medium mb-1">Name</label>
-                    <input type="text" className="w-full border rounded-lg px-4 py-2 bg-zinc-50 focus:ring-2 outline-none" placeholder="e.g. Sarah" />
+                    <input
+                      type="text"
+                      value={faceName}
+                      onChange={(e) => setFaceName(e.target.value)}
+                      className="w-full border rounded-lg px-4 py-2 bg-zinc-50 focus:ring-2 outline-none"
+                      placeholder="e.g. Sarah"
+                    />
                   </div>
                   <div>
                     <label className="block text-sm font-medium mb-1">Relationship</label>
-                    <input type="text" className="w-full border rounded-lg px-4 py-2 bg-zinc-50 focus:ring-2 outline-none" placeholder="e.g. Daughter" />
+                    <input
+                      type="text"
+                      value={faceRelationship}
+                      onChange={(e) => setFaceRelationship(e.target.value)}
+                      className="w-full border rounded-lg px-4 py-2 bg-zinc-50 focus:ring-2 outline-none"
+                      placeholder="e.g. Daughter"
+                    />
                   </div>
                   <div>
                     <label className="block text-sm font-medium mb-1">Clear Photo</label>
-                    <input type="file" className="w-full border rounded-lg px-4 py-2 bg-zinc-50 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-zinc-900 file:text-white" accept="image/*" />
+                    <input
+                      type="file"
+                      onChange={onPhotoSelected}
+                      className="w-full border rounded-lg px-4 py-2 bg-zinc-50 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-zinc-900 file:text-white"
+                      accept="image/*"
+                    />
                   </div>
-                  <button type="button" className="w-full bg-zinc-900 text-white font-medium py-3 rounded-lg hover:bg-zinc-800 transition-colors mt-2">
-                    Extract Face Embedding
+                  <button
+                    type="submit"
+                    disabled={faceSaving}
+                    className="w-full bg-zinc-900 text-white font-medium py-3 rounded-lg hover:bg-zinc-800 transition-colors mt-2 disabled:opacity-60"
+                  >
+                    {faceSaving ? "Processing..." : "Extract Face Embedding"}
                   </button>
+                  {faceStatus && (
+                    <p className="text-sm font-medium text-zinc-700">{faceStatus}</p>
+                  )}
                 </form>
               </div>
             </div>

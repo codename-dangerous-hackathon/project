@@ -17,6 +17,11 @@ transformers
 torch
 openai  # For NIMs (often OpenAI-compatible API)
 
+# On-device vision (face enrollment + "Who is this?" recognition)
+insightface           # RetinaFace detector + ArcFace embeddings (buffalo_l)
+onnxruntime           # Runs the InsightFace ONNX models locally
+opencv-python-headless # Image decoding for the vision pipeline
+
 # LLM Frameworks (RAG)
 langchain
 langchain-nvidia-ai-endpoints

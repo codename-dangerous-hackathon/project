@@ -1,4 +1,9 @@
 import { test, expect } from "@playwright/test";
+import fs from "fs";
+
+const FACE_A = "e2e/fixtures/faceA.jpg";
+const FACE_B = "e2e/fixtures/faceB.jpg";
+const b64 = (p: string) => fs.readFileSync(p).toString("base64");
 
 // End-to-end tests for Anchor, exercising the real production build + FastAPI
 // backend. Feature intent comes from docs/architecture_features.md and
@@ -56,17 +61,16 @@ test.describe("Patient — Infinite Patience loop (Feature 1)", () => {
 });
 
 test.describe('Patient — "Who is this?" face recognition (Feature 2)', () => {
-  test("opens camera and identifies the enrolled person", async ({ page }) => {
+  test("opens the camera and runs real recognition on the frame", async ({
+    page,
+  }) => {
     await page.goto("/patient");
 
-    // First press opens the camera.
+    // First press opens the camera. The stream attaching to the <video> proves
+    // getUserMedia succeeded and the mount-order bug is fixed.
     await page.getByRole("button", { name: "Who is this?" }).click();
     const video = page.locator("video");
     await expect(video).toBeVisible();
-    // The camera stream is attached (proves getUserMedia succeeded). We don't
-    // gate on videoWidth>0 because headless Chromium's fake camera doesn't
-    // report real frame dimensions; the /identify backend is a mock that
-    // ignores the captured frame regardless.
     await page.waitForFunction(() => {
       const v = document.querySelector("video") as HTMLVideoElement | null;
       return !!v && v.srcObject != null;
@@ -75,19 +79,21 @@ test.describe('Patient — "Who is this?" face recognition (Feature 2)', () => {
     await page.screenshot({ path: `${SHOTS}/03-patient-camera.png`, fullPage: true });
 
     const idResp = page.waitForResponse(
-      (r) => r.url().includes("/api/identify") && r.request().method() === "POST"
+      (r) => r.url().includes("/api/identify") && r.request().method() === "POST",
+      { timeout: 30_000 }
     );
 
-    // Second press captures a frame and identifies.
+    // Second press captures a frame and runs the real InsightFace recognizer.
+    // Headless Chromium's fake camera has no real face, so the recognizer
+    // correctly returns no match (the old code always faked "Sarah").
     await page.getByRole("button", { name: "Identify Face" }).click();
     const resp = await idResp;
     expect(resp.status()).toBe(200);
-    const body = await resp.json();
-    expect(body.match).toBe(true);
+    expect((await resp.json()).match).toBe(false);
 
-    // UI announces the relationship warmly.
-    await expect(page.locator("h1")).toContainText(
-      `${body.name}, your ${body.relationship}`
+    await expect(page.locator("h1")).toHaveText(
+      "I don't recognize this person yet.",
+      { timeout: 15_000 }
     );
     await page.screenshot({ path: `${SHOTS}/04-patient-identified.png`, fullPage: true });
   });
@@ -145,6 +151,46 @@ test.describe("Caregiver — portal", () => {
     ).toBeVisible();
     await page.screenshot({ path: `${SHOTS}/06-caregiver-enrolled.png`, fullPage: true });
   });
+
+  test("enrolling a face via photo upload extracts and stores an embedding (Feature 2 enroll)", async ({
+    page,
+  }) => {
+    await page.goto("/caregiver");
+    await page.getByRole("button", { name: "Identity & Faces" }).click();
+
+    await page.locator('input[placeholder="e.g. Sarah"]').fill("Grace");
+    await page.locator('input[placeholder="e.g. Daughter"]').fill("Wife");
+    await page.locator('input[type="file"]').setInputFiles(FACE_A);
+
+    const enrollResp = page.waitForResponse(
+      (r) =>
+        new URL(r.url()).pathname === "/api/enroll" &&
+        r.request().method() === "POST",
+      { timeout: 30_000 }
+    );
+    await page.getByRole("button", { name: "Extract Face Embedding" }).click();
+
+    const resp = await enrollResp;
+    expect(resp.status()).toBe(200);
+    expect((await resp.json()).status).toBe("success");
+
+    await expect(page.getByText(/enrolled\. Photo discarded/)).toBeVisible();
+    await page.screenshot({ path: `${SHOTS}/07-caregiver-face-enrolled.png`, fullPage: true });
+  });
+
+  test("face enroll gives visible feedback when fields are missing (no silent dead button)", async ({
+    page,
+  }) => {
+    await page.goto("/caregiver");
+    await page.getByRole("button", { name: "Identity & Faces" }).click();
+
+    // Photo only, no name/relationship — must NOT silently do nothing.
+    await page.locator('input[type="file"]').setInputFiles(FACE_A);
+    await page.getByRole("button", { name: "Extract Face Embedding" }).click();
+    await expect(
+      page.getByText("Please enter both a name and a relationship.")
+    ).toBeVisible();
+  });
 });
 
 test.describe("Backend API contract (via /api proxy)", () => {
@@ -156,13 +202,33 @@ test.describe("Backend API contract (via /api proxy)", () => {
     expect((await r.json()).reply).toBeTruthy();
   });
 
-  test("POST /api/identify returns a match", async ({ request }) => {
-    const r = await request.post("/api/identify", {
-      data: { image_base64: "ZmFrZQ==" },
+  test("real face enroll + identify round-trip (recognizes A, rejects B)", async ({
+    request,
+  }) => {
+    // Enroll person A...
+    const e = await request.post("/api/enroll", {
+      data: { name: "Grace", relationship: "wife", image_base64: b64(FACE_A) },
+      timeout: 30_000,
     });
-    expect(r.status()).toBe(200);
-    const b = await r.json();
-    expect(b).toMatchObject({ match: true, name: "Sarah", relationship: "daughter" });
+    expect(e.status()).toBe(200);
+    expect((await e.json()).status).toBe("success");
+
+    // ...the same face is recognized as Grace...
+    const m = await request.post("/api/identify", {
+      data: { image_base64: b64(FACE_A) },
+      timeout: 30_000,
+    });
+    const mb = await m.json();
+    expect(mb.match).toBe(true);
+    expect(mb.name).toBe("Grace");
+    expect(mb.relationship).toBe("wife");
+
+    // ...and a different person is NOT matched (proves it's real, not a mock).
+    const n = await request.post("/api/identify", {
+      data: { image_base64: b64(FACE_B) },
+      timeout: 30_000,
+    });
+    expect((await n.json()).match).toBe(false);
   });
 
   test("POST /api/enroll_memory writes to the vault", async ({ request }) => {
@@ -200,10 +266,6 @@ test.describe("Spec gaps (P0 features missing in UI)", () => {
   );
   test.fixme(
     'Photo Memory Journal exists (Patient "Memories" button is a no-op; no journal view)',
-    async () => {}
-  );
-  test.fixme(
-    "Face enrollment is wired (Caregiver 'Extract Face Embedding' button has no handler / no /enroll call)",
     async () => {}
   );
   test.fixme(
