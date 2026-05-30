@@ -2,8 +2,8 @@ import { MetadataRoute } from 'next'
  
 export default function manifest(): MetadataRoute.Manifest {
   return {
-    name: 'Anchor Companion',
-    short_name: 'Anchor',
+    name: 'Belong',
+    short_name: 'Belong',
     description: 'A 100% on-device AI companion that helps people with dementia recognize loved ones.',
     start_url: '/patient',
     display: 'standalone',
