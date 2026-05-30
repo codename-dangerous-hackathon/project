@@ -20,7 +20,7 @@ start:
 	@echo "Starting Backend (FastAPI)..."
 	@cd src/backend && nohup ../../venv/bin/uvicorn main:app --host 127.0.0.1 --port 8001 --reload > ../../backend.log 2>&1 & echo $$! > backend.pid
 	@echo "Starting Frontend (Next.js)..."
-	@cd src/frontend && nohup npm run dev > ../../frontend.log 2>&1 & echo $$! > frontend.pid
+	@cd src/frontend && nohup npm start > ../../frontend.log 2>&1 & echo $$! > frontend.pid
 	@echo "========================================="
 	@echo "✅ Anchor is running in the background!"
 	@echo "Frontend: http://localhost:3000"
