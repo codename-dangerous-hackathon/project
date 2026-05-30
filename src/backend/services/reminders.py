@@ -129,6 +129,8 @@ def _payload_for(e: dict) -> dict:
         heading = f"📅 {title}"
     elif t == "activity":
         heading = f"🎟️ {title}"
+    elif t == "waste_pickup":
+        heading = f"♻️ {title}"
     else:
         heading = f"👪 {title}"
     return {

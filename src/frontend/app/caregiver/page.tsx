@@ -15,7 +15,7 @@ type Person = {
 type Recurrence = "once" | "daily" | "weekly" | "monthly";
 type EventItem = {
   id: string;
-  type: "medication" | "appointment" | "family" | "activity";
+  type: "medication" | "appointment" | "family" | "activity" | "waste_pickup";
   title: string;
   notes?: string;
   time: string;
@@ -70,6 +70,7 @@ const TYPE_STYLE: Record<string, { icon: string; cls: string }> = {
   appointment: { icon: "📅", cls: "bg-blue-100 text-blue-800" },
   family: { icon: "👪", cls: "bg-purple-100 text-purple-800" },
   activity: { icon: "🎟️", cls: "bg-emerald-100 text-emerald-800" },
+  waste_pickup: { icon: "♻️", cls: "bg-green-100 text-green-800" },
 };
 
 function CalendarMonth({

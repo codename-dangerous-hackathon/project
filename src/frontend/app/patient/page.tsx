@@ -354,11 +354,16 @@ export default function PatientPage() {
         {remindersOn ? "🔔 Reminders on" : "🔕 Turn on reminders"}
       </button>
 
-      {/* Full-screen reminder card (medication / appointment / family) */}
+      {/* Full-screen reminder card (medication / appointment / family / waste_pickup) */}
       {reminder && (
         <div className="absolute inset-0 z-30 bg-black/95 flex flex-col items-center justify-center p-8 text-center">
           <div className="text-8xl mb-6">
-            {reminder.type === "medication" ? "💊" : reminder.type === "appointment" ? "📅" : reminder.type === "activity" ? "🎟️" : reminder.type === "family" ? "👪" : "🔔"}
+            {reminder.type === "medication" ? "💊"
+              : reminder.type === "appointment" ? "📅"
+              : reminder.type === "activity" ? "🎟️"
+              : reminder.type === "family" ? "👪"
+              : reminder.type === "waste_pickup" ? "♻️"
+              : "🔔"}
           </div>
           <h2 className="text-5xl md:text-6xl font-semibold text-white mb-4 max-w-3xl leading-tight">
             {reminder.title}
@@ -370,7 +375,9 @@ export default function PatientPage() {
             onClick={() => setReminder(null)}
             className="bg-emerald-600 hover:bg-emerald-500 text-white text-3xl font-bold rounded-full px-16 py-8 shadow-2xl active:scale-95 transition-transform"
           >
-            {reminder.type === "medication" ? "✓ I took it" : "✓ Okay"}
+            {reminder.type === "medication" ? "✓ I took it"
+              : reminder.type === "waste_pickup" ? "✓ I'll put the bins out"
+              : "✓ Okay"}
           </button>
         </div>
       )}
