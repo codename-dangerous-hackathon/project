@@ -8,6 +8,7 @@ from tools.audio import transcribe_audio_local, synthesize_speech_local
 from tools.vision import extract_face_embedding_from_base64
 from services import reminders
 from services import eventbrite
+from services import profile
 from services import places as memory_places
 from services import profile
 import uuid
