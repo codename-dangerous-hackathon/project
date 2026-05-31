@@ -93,8 +93,9 @@ Today `companion.py` stuffs everything (date, family, schedule, places, RAG) int
 
 ## Phase 5 — Observability & ops
 
-- [ ] Structured logging (JSON logs, levels) across the backend; a `/health` endpoint that reports model-warmup state + LLM reachability.
-- [ ] Metrics for the model loop (latency, fallback rate, eval score over time) — even a local dashboard.
+- [x] **Companion turn-tracing + `/health`** — done 2026-05-30. `services/observability.py` records per-turn traces (retrieved ids+scores, context flags, latency, tokens, fallback) to a ring + gitignored `data/traces.jsonl`; `GET /health` (model warmup + LLM reachability + store counts) and `GET /traces` (metrics only — no conversation text, since the backend is funnel-public). 67 tests green.
+- [ ] Metrics over time / a local dashboard (the `/traces` summary already gives turns / fallback-rate / avg+p95 latency; a caregiver "what Belong knows & why" view could consume traces+provenance).
+- [ ] Structured JSON logging across the backend (levels).
 - [ ] Graceful degradation contract: define + test what each feature does when the LLM / a model / the network is down (the patient app must never hard-crash).
 
 ---
