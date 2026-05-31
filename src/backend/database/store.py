@@ -1,0 +1,285 @@
+"""
+Typed SQLite data-access layer for Belong (Phase 2 Step 2).
+
+This is the structured source of truth the app is migrating onto. In Step 2 it is
+populated by `backfill.reconcile()` and exercised by tests; the route layer adopts
+it in Step 3 (until then routes still read/write Chroma + JSON, so nothing here is
+on a hot path yet).
+
+Conventions:
+  * One short-lived connection per call (thread-safe for the app + scheduler).
+  * Writers are idempotent upserts keyed on `id` (INSERT ... ON CONFLICT DO UPDATE)
+    so a re-run of the backfill never duplicates rows.
+  * Readers return the SAME dict shapes the existing routes already emit (see
+    api/routes.py and database/chroma_manager.py), so the Step 3 cutover is a
+    drop-in swap.
+"""
+import uuid
+from contextlib import closing
+from datetime import datetime
+
+from database import sqlite_manager
+
+PROFILE_FIELDS = ("name", "tagline", "photo", "emergency_name", "emergency_phone", "medical")
+
+
+# ----- writers ---------------------------------------------------------------
+
+def add_provenance(actor: str, source: str, entered_at: str, actor_label: str | None = None,
+                   provenance_id: str | None = None) -> str:
+    """Record who entered a fact, when, and how. Returns the provenance id.
+    Pass a stable `provenance_id` to upsert a shared row (e.g. the single
+    'migration' provenance reused by the idempotent backfill); omit it for a
+    fresh per-fact uuid."""
+    pid = provenance_id or str(uuid.uuid4())
+    with closing(sqlite_manager.get_connection()) as conn:
+        conn.execute(
+            "INSERT INTO provenance (id, actor, actor_label, source, entered_at) "
+            "VALUES (?, ?, ?, ?, ?) "
+            "ON CONFLICT(id) DO UPDATE SET "
+            "  actor=excluded.actor, actor_label=excluded.actor_label, "
+            "  source=excluded.source, entered_at=excluded.entered_at",
+            (pid, actor, actor_label, source, entered_at),
+        )
+        conn.commit()
+    return pid
+
+
+def upsert_person(person_id: str, name: str, relationship: str, has_photo: bool,
+                  created_at: str, updated_at: str) -> None:
+    with closing(sqlite_manager.get_connection()) as conn:
+        conn.execute(
+            "INSERT INTO people (id, name, relationship, has_photo, created_at, updated_at) "
+            "VALUES (?, ?, ?, ?, ?, ?) "
+            "ON CONFLICT(id) DO UPDATE SET "
+            "  name=excluded.name, relationship=excluded.relationship, "
+            "  has_photo=excluded.has_photo, updated_at=excluded.updated_at",
+            (person_id, name, relationship, 1 if has_photo else 0, created_at, updated_at),
+        )
+        conn.commit()
+
+
+def upsert_event(event_id: str, type: str, title: str, notes: str, time: str, date: str,
+                 recurrence: str, created_at: str, provenance_id: str | None = None) -> None:
+    with closing(sqlite_manager.get_connection()) as conn:
+        conn.execute(
+            "INSERT INTO events (id, type, title, notes, time, date, recurrence, created_at, provenance_id) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) "
+            "ON CONFLICT(id) DO UPDATE SET "
+            "  type=excluded.type, title=excluded.title, notes=excluded.notes, "
+            "  time=excluded.time, date=excluded.date, recurrence=excluded.recurrence, "
+            "  provenance_id=excluded.provenance_id",
+            (event_id, type, title, notes, time, date, recurrence, created_at, provenance_id),
+        )
+        conn.commit()
+
+
+def upsert_memory(memory_id: str, text: str, kind: str, person_id: str | None, scope: str | None,
+                  tags: str, event_time: str | None, created_at: str, provenance_id: str) -> None:
+    with closing(sqlite_manager.get_connection()) as conn:
+        conn.execute(
+            "INSERT INTO memories (id, text, kind, person_id, scope, tags, event_time, created_at, provenance_id) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) "
+            "ON CONFLICT(id) DO UPDATE SET "
+            "  text=excluded.text, kind=excluded.kind, person_id=excluded.person_id, "
+            "  scope=excluded.scope, tags=excluded.tags, event_time=excluded.event_time, "
+            "  provenance_id=excluded.provenance_id",
+            (memory_id, text, kind, person_id, scope, tags or "", event_time, created_at, provenance_id),
+        )
+        conn.commit()
+
+
+def save_profile(updates: dict, updated_at: str) -> None:
+    """Upsert the single patient profile row (id='patient')."""
+    vals = {k: (updates.get(k) or "") for k in PROFILE_FIELDS}
+    cols = ", ".join(PROFILE_FIELDS)
+    placeholders = ", ".join("?" for _ in PROFILE_FIELDS)
+    setters = ", ".join(f"{k}=excluded.{k}" for k in PROFILE_FIELDS)
+    with closing(sqlite_manager.get_connection()) as conn:
+        conn.execute(
+            f"INSERT INTO profile (id, {cols}, updated_at) VALUES ('patient', {placeholders}, ?) "
+            f"ON CONFLICT(id) DO UPDATE SET {setters}, updated_at=excluded.updated_at",
+            (*[vals[k] for k in PROFILE_FIELDS], updated_at),
+        )
+        conn.commit()
+
+
+# ----- readers (mirror existing route shapes) --------------------------------
+
+def list_people() -> list[dict]:
+    with closing(sqlite_manager.get_connection()) as conn:
+        rows = conn.execute(
+            "SELECT id, name, relationship, has_photo, "
+            "  (SELECT COUNT(*) FROM memories m WHERE m.person_id = p.id AND m.superseded_by IS NULL) AS memory_count "
+            "FROM people p ORDER BY name"
+        ).fetchall()
+    return [
+        {"id": r["id"], "name": r["name"], "relationship": r["relationship"],
+         "has_photo": bool(r["has_photo"]), "memory_count": r["memory_count"]}
+        for r in rows
+    ]
+
+
+def get_person(person_id: str) -> dict | None:
+    with closing(sqlite_manager.get_connection()) as conn:
+        r = conn.execute(
+            "SELECT id, name, relationship, has_photo FROM people WHERE id = ?", (person_id,)
+        ).fetchone()
+    if not r:
+        return None
+    return {"id": r["id"], "name": r["name"], "relationship": r["relationship"],
+            "has_photo": bool(r["has_photo"])}
+
+
+# memory readers carry provenance (who entered the fact, when) so the caregiver
+# UI can show "Belong knows this because you added it on <added_at>".
+_MEM_SELECT = (
+    "SELECT m.id, m.text, m.event_time, m.tags, pv.actor AS added_by, pv.entered_at AS added_at "
+    "FROM memories m LEFT JOIN provenance pv ON m.provenance_id = pv.id"
+)
+
+
+def list_memories_for_person(person_id: str) -> list[dict]:
+    with closing(sqlite_manager.get_connection()) as conn:
+        rows = conn.execute(
+            _MEM_SELECT + " WHERE m.person_id = ? AND m.superseded_by IS NULL", (person_id,)
+        ).fetchall()
+    return [{"id": r["id"], "text": r["text"], "added_by": r["added_by"], "added_at": r["added_at"]}
+            for r in rows]
+
+
+def list_general_memories() -> list[dict]:
+    with closing(sqlite_manager.get_connection()) as conn:
+        rows = conn.execute(
+            _MEM_SELECT + " WHERE m.person_id IS NULL AND m.superseded_by IS NULL"
+        ).fetchall()
+    return [{"id": r["id"], "text": r["text"], "added_by": r["added_by"], "added_at": r["added_at"]}
+            for r in rows]
+
+
+def list_events() -> list[dict]:
+    with closing(sqlite_manager.get_connection()) as conn:
+        rows = conn.execute(
+            "SELECT id, type, title, notes, time, date, recurrence FROM events"
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def get_profile() -> dict:
+    with closing(sqlite_manager.get_connection()) as conn:
+        r = conn.execute(
+            f"SELECT {', '.join(PROFILE_FIELDS)} FROM profile WHERE id = 'patient'"
+        ).fetchone()
+    if not r:
+        return {k: "" for k in PROFILE_FIELDS}
+    return {k: (r[k] or "") for k in PROFILE_FIELDS}
+
+
+def list_memories() -> list[dict]:
+    """Every live memory in the legacy {id,text,date,tags} shape, plus provenance
+    (added_by/added_at). `date` maps from event_time (episodic), "" for semantic."""
+    with closing(sqlite_manager.get_connection()) as conn:
+        rows = conn.execute(_MEM_SELECT + " WHERE m.superseded_by IS NULL").fetchall()
+    return [{"id": r["id"], "text": r["text"], "date": r["event_time"] or "", "tags": r["tags"] or "",
+             "added_by": r["added_by"], "added_at": r["added_at"]} for r in rows]
+
+
+# ----- deletes ---------------------------------------------------------------
+
+def delete_memory(memory_id: str) -> None:
+    with closing(sqlite_manager.get_connection()) as conn:
+        conn.execute("DELETE FROM memories WHERE id = ?", (memory_id,))
+        conn.commit()
+
+
+def delete_person(person_id: str) -> None:
+    """Delete a person; FK ON DELETE CASCADE removes their memories + relationships
+    (foreign_keys is enabled per-connection in sqlite_manager.get_connection)."""
+    with closing(sqlite_manager.get_connection()) as conn:
+        conn.execute("DELETE FROM people WHERE id = ?", (person_id,))
+        conn.commit()
+
+
+def delete_event(event_id: str) -> None:
+    with closing(sqlite_manager.get_connection()) as conn:
+        conn.execute("DELETE FROM events WHERE id = ?", (event_id,))
+        conn.commit()
+
+
+# ----- retrieval support (Step 5) --------------------------------------------
+
+def get_memories_by_ids(ids: list[str]) -> dict[str, dict]:
+    """Full memory rows keyed by id, for reranking vector candidates."""
+    if not ids:
+        return {}
+    placeholders = ",".join("?" for _ in ids)
+    with closing(sqlite_manager.get_connection()) as conn:
+        rows = conn.execute(
+            f"SELECT id, text, kind, person_id, scope, tags, event_time, created_at, "
+            f"last_used_at, use_count, superseded_by FROM memories WHERE id IN ({placeholders})",
+            tuple(ids),
+        ).fetchall()
+    return {r["id"]: dict(r) for r in rows}
+
+
+def bump_memory_usage(ids: list[str], now: str) -> None:
+    """Record that these memories were surfaced (feeds the frequency signal)."""
+    if not ids:
+        return
+    placeholders = ",".join("?" for _ in ids)
+    with closing(sqlite_manager.get_connection()) as conn:
+        conn.execute(
+            f"UPDATE memories SET use_count = use_count + 1, last_used_at = ? WHERE id IN ({placeholders})",
+            (now, *ids),
+        )
+        conn.commit()
+
+
+# ----- consolidation support (Step 7) ----------------------------------------
+
+def list_active_semantic() -> list[dict]:
+    """Live (non-superseded) semantic memories — the dedup candidates."""
+    with closing(sqlite_manager.get_connection()) as conn:
+        rows = conn.execute(
+            "SELECT id, person_id, use_count, created_at FROM memories "
+            "WHERE kind = 'semantic' AND superseded_by IS NULL"
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def mark_superseded(memory_id: str, survivor_id: str) -> None:
+    """Soft-delete a duplicate by pointing it at the surviving memory."""
+    with closing(sqlite_manager.get_connection()) as conn:
+        conn.execute("UPDATE memories SET superseded_by = ? WHERE id = ?", (survivor_id, memory_id))
+        conn.commit()
+
+
+# ----- mood check-ins (Phase 4) ----------------------------------------------
+
+def add_mood(mood: str, note: str = "", actor: str = "patient") -> dict:
+    """Log a patient mood check-in (with provenance). Returns the new row."""
+    mid = str(uuid.uuid4())
+    now = datetime.now().isoformat()
+    prov = add_provenance(actor=actor, source="checkin", entered_at=now)
+    with closing(sqlite_manager.get_connection()) as conn:
+        conn.execute(
+            "INSERT INTO mood_logs (id, mood, note, created_at, provenance_id) VALUES (?, ?, ?, ?, ?)",
+            (mid, mood, note or "", now, prov),
+        )
+        conn.commit()
+    return {"id": mid, "mood": mood, "note": note or "", "created_at": now}
+
+
+def list_moods(limit: int = 30) -> list[dict]:
+    with closing(sqlite_manager.get_connection()) as conn:
+        rows = conn.execute(
+            "SELECT id, mood, note, created_at FROM mood_logs ORDER BY created_at DESC LIMIT ?",
+            (limit,),
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def delete_mood(mood_id: str) -> None:
+    with closing(sqlite_manager.get_connection()) as conn:
+        conn.execute("DELETE FROM mood_logs WHERE id = ?", (mood_id,))
+        conn.commit()

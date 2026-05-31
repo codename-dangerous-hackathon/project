@@ -151,8 +151,12 @@ function CalendarMonth({
   );
 }
 
+const MOOD_EMOJI: Record<string, string> = {
+  great: "😊", good: "🙂", okay: "😐", low: "😟", sad: "😢",
+};
+
 export default function CaregiverPage() {
-  const [activeTab, setActiveTab] = useState<"dashboard" | "family" | "notes" | "calendar">("dashboard");
+  const [activeTab, setActiveTab] = useState<"dashboard" | "family" | "notes" | "calendar" | "mood">("dashboard");
 
   // Family members
   const [people, setPeople] = useState<Person[]>([]);
@@ -177,6 +181,25 @@ export default function CaregiverPage() {
       /* offline */
     }
   }, []);
+
+  // Mood check-ins (patient wellbeing history)
+  const [moods, setMoods] = useState<{ id: string; mood: string; note: string; created_at: string }[]>([]);
+  const loadMoods = useCallback(async () => {
+    try {
+      const res = await fetch("/api/mood", { cache: "no-store" });
+      setMoods((await res.json()).moods || []);
+    } catch {
+      /* offline */
+    }
+  }, []);
+  const deleteMood = async (id: string) => {
+    try {
+      await fetch(`/api/mood/${id}`, { method: "DELETE" });
+    } catch {
+      /* ignore */
+    }
+    loadMoods();
+  };
 
   const handleAddEvent = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -387,11 +410,15 @@ export default function CaregiverPage() {
       loadProfile();
     }
     if (activeTab === "family" || activeTab === "notes") load();
-    if (activeTab === "notes") loadProfile();
+    if (activeTab === "notes") {
+      loadProfile();
+      loadPhotoMems();
+    }
     if (activeTab === "calendar") {
       loadEvents();
       loadDiscover();
     }
+    if (activeTab === "mood") loadMoods();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeTab]);
 
@@ -500,6 +527,56 @@ export default function CaregiverPage() {
     }
   };
 
+  // --- Photo memories (a picture + a caption) ---
+  const [photoCaption, setPhotoCaption] = useState("");
+  const [photoB64, setPhotoB64] = useState("");
+  const [photoStatus, setPhotoStatus] = useState("");
+  const [photoMems, setPhotoMems] = useState<{ id: string; caption: string }[]>([]);
+
+  const loadPhotoMems = useCallback(async () => {
+    try {
+      const res = await fetch("/api/photo-journal", { cache: "no-store" });
+      setPhotoMems((await res.json()).photos || []);
+    } catch {
+      /* offline */
+    }
+  }, []);
+
+  const handleAddPhotoMemory = async () => {
+    if (!photoCaption.trim() || !photoB64) {
+      setPhotoStatus("⚠️ Add a caption and a photo.");
+      return;
+    }
+    setPhotoStatus("Saving…");
+    try {
+      const res = await fetch("/api/memories/photo", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text: photoCaption, image_base64: photoB64 }),
+      });
+      if (res.ok) {
+        setPhotoCaption("");
+        setPhotoB64("");
+        setPhotoStatus("✅ Added.");
+        setTimeout(() => setPhotoStatus(""), 2500);
+        await loadPhotoMems();
+      } else {
+        setPhotoStatus("❌ Could not save that photo.");
+      }
+    } catch {
+      setPhotoStatus("❌ Backend offline.");
+    }
+  };
+
+  const handleDeletePhotoMemory = async (id: string) => {
+    try {
+      await fetch(`/api/memories/${id}`, { method: "DELETE" });
+    } catch {
+      /* ignore */
+    }
+    loadPhotoMems();
+  };
+
   return (
     <main className="min-h-screen bg-zinc-50 text-zinc-900 pb-12">
       {/* Header */}
@@ -528,6 +605,7 @@ export default function CaregiverPage() {
             ["dashboard", "📊 Daily Dashboard"],
             ["family", "👪 Family Members"],
             ["calendar", "🗓️ Calendar"],
+            ["mood", "💚 Wellbeing"],
             ["notes", "📖 Patient Notes"],
           ] as const).map(([key, label]) => (
             <button
@@ -1111,6 +1189,84 @@ export default function CaregiverPage() {
                   </ul>
                 )}
               </div>
+
+              {/* Photo Memories — a picture + a caption (shown in the patient's Photo Journal) */}
+              <div className="bg-white border rounded-2xl p-6 shadow-sm">
+                <h3 className="font-medium text-lg mb-4">Photo Memories</h3>
+                <div className="space-y-3 mb-5">
+                  <textarea
+                    value={photoCaption}
+                    onChange={(e) => setPhotoCaption(e.target.value)}
+                    className="w-full border rounded-lg px-4 py-3 bg-zinc-50 focus:ring-2 outline-none min-h-[60px]"
+                    placeholder="A caption — e.g., the trip to the lake with the grandkids in 1998."
+                  />
+                  <input
+                    type="file"
+                    accept="image/*"
+                    onChange={async (e) => { const f = e.target.files?.[0]; setPhotoB64(f ? await fileToBase64(f) : ""); }}
+                    className="block w-full text-sm file:mr-3 file:py-1.5 file:px-3 file:rounded-full file:border-0 file:text-xs file:font-semibold file:bg-zinc-200"
+                  />
+                  <div className="flex items-center gap-4">
+                    <button onClick={handleAddPhotoMemory} className="bg-zinc-900 text-white font-medium px-6 py-3 rounded-lg hover:bg-zinc-800 transition-colors">Add Photo Memory</button>
+                    {photoStatus && <span className="text-sm font-medium text-emerald-600">{photoStatus}</span>}
+                  </div>
+                </div>
+                {photoMems.length === 0 ? (
+                  <p className="text-zinc-400 text-sm">No photo memories yet.</p>
+                ) : (
+                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                    {photoMems.map((p) => (
+                      <div key={p.id} className="relative border rounded-xl overflow-hidden">
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img src={`/api/memories/${p.id}/photo`} alt={p.caption} className="w-full h-28 object-cover" />
+                        <div className="p-2 text-xs text-zinc-700 leading-snug">{p.caption}</div>
+                        <button
+                          onClick={() => handleDeletePhotoMemory(p.id)}
+                          className="absolute top-1 right-1 bg-white/90 rounded-full w-6 h-6 text-zinc-500 hover:text-red-600 text-sm"
+                          title="Remove"
+                        >
+                          ✕
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* WELLBEING — patient mood check-in history */}
+          {activeTab === "mood" && (
+            <div className="space-y-6">
+              <div className="flex items-center justify-between border-b pb-4">
+                <h2 className="text-3xl font-semibold tracking-tight">Mood Check-ins</h2>
+                <span className="text-sm text-zinc-500">{moods.length} recorded</span>
+              </div>
+              {moods.length === 0 ? (
+                <p className="text-zinc-500">
+                  No check-ins yet. They appear here when the patient taps &ldquo;How I Feel&rdquo;.
+                </p>
+              ) : (
+                <ul className="space-y-3">
+                  {moods.map((m) => (
+                    <li key={m.id} className="bg-white border rounded-2xl p-5 shadow-sm flex items-center gap-4">
+                      <span className="text-4xl shrink-0">{MOOD_EMOJI[m.mood] || "🙂"}</span>
+                      <div className="flex-1 min-w-0">
+                        <div className="font-medium capitalize">{m.mood}</div>
+                        {m.note && <div className="text-sm text-zinc-600">{m.note}</div>}
+                        <div className="text-xs text-zinc-400">{new Date(m.created_at).toLocaleString()}</div>
+                      </div>
+                      <button
+                        onClick={() => deleteMood(m.id)}
+                        className="text-zinc-400 hover:text-red-600 text-sm shrink-0"
+                        title="Remove"
+                      >
+                        ✕
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
             </div>
           )}
         </section>

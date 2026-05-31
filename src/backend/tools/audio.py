@@ -66,6 +66,11 @@ def warmup() -> None:
     _get_piper(DEFAULT_LANG)
 
 
+def warmed() -> bool:
+    """Whether the STT model is loaded (for /health)."""
+    return _whisper is not None
+
+
 def transcribe_audio_local(audio_bytes: bytes) -> str:
     """
     Transcribe patient speech in whatever language they spoke (auto-detected).

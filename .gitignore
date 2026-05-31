@@ -38,3 +38,9 @@ src/backend/data/
 
 # Secrets — VAPID private key for Web Push (keep on disk, never commit)
 src/backend/keys/vapid_private.pem
+
+# Eval/test outputs — companion replies echo real patient data; keep local
+/test-results/
+
+# Personal Claude Code config (shared .claude/ config IS committed; this isn't)
+.claude/settings.local.json

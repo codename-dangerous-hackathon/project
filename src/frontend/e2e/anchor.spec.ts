@@ -672,6 +672,67 @@ test.describe("Stored data views (verify what's saved)", () => {
       page.getByRole("heading", { name: "💊 Time for your Heart Pill" })
     ).not.toBeVisible();
   });
+
+  test("Patient Daily Briefing overlay shows a warm morning briefing", async ({ page }) => {
+    await page.goto("/patient");
+    await page.getByRole("button", { name: /Good Morning/i }).click();
+    await expect(page.getByRole("heading", { name: /Daily Briefing/i })).toBeVisible();
+    // The briefing body always states today's date ("Today is …") — unique to the
+    // overlay (avoids colliding with the "🌅 Good Morning" button text).
+    await expect(page.getByText(/Today is/i)).toBeVisible();
+    await page.screenshot({ path: `${SHOTS}/14-patient-briefing.png`, fullPage: true });
+    await page.getByRole("button", { name: "Close" }).click();
+    await expect(page.getByRole("heading", { name: /Daily Briefing/i })).not.toBeVisible();
+  });
+
+  test("Patient Mood check-in logs a feeling the caregiver can see", async ({ page, request }) => {
+    // Patient taps how they feel.
+    await page.goto("/patient");
+    await page.getByRole("button", { name: /How I Feel/i }).click();
+    await expect(page.getByRole("heading", { name: /How are you feeling/i })).toBeVisible();
+    await page.getByRole("button", { name: /Great/i }).click();
+    await expect(page.getByRole("heading", { name: /Thank you for sharing/i })).toBeVisible();
+    await page.screenshot({ path: `${SHOTS}/15-patient-mood.png`, fullPage: true });
+    await page.getByRole("button", { name: /Done/i }).click();
+
+    // Caregiver sees it under Wellbeing.
+    await page.goto("/caregiver");
+    await page.getByRole("button", { name: "Wellbeing" }).click();
+    await expect(page.getByRole("heading", { name: "Mood Check-ins" })).toBeVisible();
+    await expect(page.getByText("great", { exact: false }).first()).toBeVisible();
+
+    // Cleanup: this is a real backend; remove the entries this test created.
+    const moods = (await (await request.get("/api/mood")).json()).moods || [];
+    for (const m of moods) await request.delete(`/api/mood/${m.id}`);
+  });
+
+  test("Photo Memory Journal: caregiver adds a photo memory, patient sees it", async ({ page, request }) => {
+    const caption = `Lake trip ${Date.now()}`;
+    // Caregiver adds a photo memory (caption + image) in Patient Notes.
+    await page.goto("/caregiver");
+    await page.getByRole("button", { name: "Patient Notes" }).click();
+    await page.getByPlaceholder(/A caption/).fill(caption);
+    await page.locator('input[type="file"]').last().setInputFiles(FACE_A);
+    await page.waitForTimeout(500); // let the FileReader produce the base64
+    const posted = page.waitForResponse(
+      (r) => new URL(r.url()).pathname === "/api/memories/photo" && r.request().method() === "POST",
+      { timeout: 30_000 }
+    );
+    await page.getByRole("button", { name: "Add Photo Memory" }).click();
+    expect((await posted).status()).toBe(200);
+
+    // Patient browses the Photo Journal and sees the captioned photo.
+    await page.goto("/patient");
+    await page.getByRole("button", { name: /Photo Journal/i }).click();
+    await expect(page.getByRole("heading", { name: "Photo Journal" })).toBeVisible();
+    await expect(page.getByText(caption)).toBeVisible();
+    await expect(page.locator(`img[alt="${caption}"]`)).toBeVisible();
+    await page.screenshot({ path: `${SHOTS}/16-patient-photo-journal.png`, fullPage: true });
+
+    // Cleanup (real backend).
+    const photos = (await (await request.get("/api/photo-journal")).json()).photos || [];
+    for (const p of photos) await request.delete(`/api/memories/${p.id}`);
+  });
 });
 
 test.describe("Map — nearby places", () => {
@@ -698,20 +759,6 @@ test.describe("Map — nearby places", () => {
 // Marked fixme so they surface in the report as "not implemented" without
 // failing the suite. These are the real coverage gaps vs. the docs.
 // ---------------------------------------------------------------------------
-test.describe("Spec gaps (P0 features missing in UI)", () => {
-  test.fixme(
-    "Daily Briefing has a Patient-facing UI (backend /briefing exists, no UI calls it)",
-    async () => {}
-  );
-  // NOTE: the Patient "Memories" button now works (lists life-story memories,
-  // tap to hear). What's still missing is the richer photo + voice-caption
-  // journal from the spec.
-  test.fixme(
-    "Photo Memory Journal with photos + voice captions (text memories work; no photo journal yet)",
-    async () => {}
-  );
-  test.fixme(
-    "Mood check-in is interactive (dashboard shows static mood only)",
-    async () => {}
-  );
-});
+// The former "Spec gaps" P0 features — Daily Briefing, Mood check-in, and Photo
+// Memory Journal — are all implemented now, each with a real test in the
+// "Stored data views" group above (no remaining test.fixme placeholders).

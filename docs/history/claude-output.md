@@ -1,6 +1,8 @@
 # Anchor — Project Specification
 ### *(working name — alternates: Kindred · Mira · Reverie)*
 
+> ⚠️ **Historical design note — original hackathon spec, kept for context.** The app shipped as **Belong** on **Nemotron Nano 30B** + **Piper** TTS; some P0/P1 scoping below differs from what was built. Current source of truth: root [`README.md`](../../README.md) / [`CLAUDE.md`](../../CLAUDE.md); forward plan: [`docs/ROADMAP.md`](../ROADMAP.md).
+
 **Team:** Dangerous · **Event:** The Spark Hack Series (NVIDIA) · **Track:** Public Services
 **One-liner:** A 100% on-device AI companion that helps people with dementia recognize loved ones, stay oriented, and hold onto their story — with every byte of their life staying on the box.
 

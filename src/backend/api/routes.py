@@ -4,6 +4,8 @@ from pydantic import BaseModel
 from typing import List, Optional
 from agents.companion import ask_companion
 from database.chroma_manager import vdb
+from database import store      # SQLite reads (authoritative for structured data)
+from database import writes     # dual-write coordinator (SQLite + Chroma)
 from tools.audio import transcribe_audio_local, synthesize_speech_local
 from tools.vision import extract_face_embedding_from_base64
 from services import reminders
@@ -75,6 +77,14 @@ class PersonMemoryRequest(BaseModel):
 class PersonPhotoRequest(BaseModel):
     image_base64: str
 
+class MoodRequest(BaseModel):
+    mood: str  # one of MOODS
+    note: Optional[str] = ""
+
+class PhotoMemoryRequest(BaseModel):
+    text: str  # the caption
+    image_base64: str
+
 @router.post("/ask")
 async def ask_endpoint(request: AskRequest):
     """
@@ -89,6 +99,9 @@ async def ask_endpoint(request: AskRequest):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+# LEGACY (back-compat): /enroll, /faces, DELETE /faces/{id} are the old face-only
+# path that never created a people row (the UI uses /people). Left on Chroma; not
+# part of the SQLite cutover.
 @router.post("/enroll")
 async def enroll_face(request: EnrollFaceRequest):
     """
@@ -138,7 +151,8 @@ async def identify_person(request: IdentifyRequest):
                 meta = metadatas[0][0]
                 person_id = ids[0][0]
                 # Pull a warm, remembered fact about this person if we have one.
-                person_mems = vdb.list_memories_for_person(person_id)
+                # (Face match stays on Chroma; the fact comes from SQLite.)
+                person_mems = store.list_memories_for_person(person_id)
                 fact = person_mems[0]["text"] if person_mems else ""
                 return {
                     "match": True,
@@ -161,13 +175,12 @@ async def create_person(request: CreatePersonRequest):
     try:
         if not request.name.strip() or not request.relationship.strip():
             raise HTTPException(status_code=400, detail="Name and relationship are required.")
-        person_id = str(uuid.uuid4())
         if request.image_base64:
-            photos.save_photo(person_id, request.image_base64)  # thumbnail for "About Me"
             embedding = extract_face_embedding_from_base64(request.image_base64)
+            person_id = writes.create_person(request.name, request.relationship,
+                                             has_photo=embedding is not None)
+            photos.save_photo(person_id, request.image_base64)  # thumbnail for "About Me"
             if embedding is None:
-                # Still create the person, just without face recognition.
-                vdb.add_person(person_id, request.name, request.relationship, has_photo=False)
                 return {
                     "status": "no_face",
                     "person_id": person_id,
@@ -175,9 +188,9 @@ async def create_person(request: CreatePersonRequest):
                     "has_photo": False,
                     "message": "Saved — but no clear face was detected, so 'Who is this?' won't recognize them yet. Add a clearer photo anytime.",
                 }
-            vdb.set_person_photo(person_id, embedding, request.name, request.relationship)
+            writes.set_photo_flag(person_id, request.name, request.relationship, embedding)
             return {"status": "success", "person_id": person_id, "name": request.name, "has_photo": True}
-        vdb.add_person(person_id, request.name, request.relationship, has_photo=False)
+        person_id = writes.create_person(request.name, request.relationship, has_photo=False)
         return {"status": "success", "person_id": person_id, "name": request.name, "has_photo": False}
     except HTTPException:
         raise
@@ -187,16 +200,16 @@ async def create_person(request: CreatePersonRequest):
 @router.get("/people")
 async def list_people():
     try:
-        return {"people": vdb.list_people()}
+        return {"people": store.list_people()}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.get("/people/{person_id}")
 async def get_person(person_id: str):
-    person = vdb.get_person(person_id)
+    person = store.get_person(person_id)
     if not person:
         raise HTTPException(status_code=404, detail="Person not found")
-    person["memories"] = vdb.list_memories_for_person(person_id)
+    person["memories"] = store.list_memories_for_person(person_id)
     return person
 
 @router.get("/people/{person_id}/photo")
@@ -211,7 +224,7 @@ async def get_person_photo(person_id: str):
 @router.delete("/people/{person_id}")
 async def delete_person(person_id: str):
     try:
-        vdb.delete_person(person_id)
+        writes.delete_person(person_id)
         photos.delete_photo(person_id)
         return {"status": "deleted", "id": person_id}
     except Exception as e:
@@ -219,38 +232,34 @@ async def delete_person(person_id: str):
 
 @router.post("/people/{person_id}/memories")
 async def add_person_memory(person_id: str, request: PersonMemoryRequest):
-    person = vdb.get_person(person_id)
+    person = store.get_person(person_id)
     if not person:
         raise HTTPException(status_code=404, detail="Person not found")
     if not request.text.strip():
         raise HTTPException(status_code=400, detail="Memory text is required.")
-    mem_id = str(uuid.uuid4())
-    vdb.add_memory(mem_id, request.text, metadata={
-        "person_id": person_id,
-        "person_name": person["name"],
-        "relationship": person["relationship"],
-        "scope": "person",
-        "tags": "person",
-    })
+    mem_id = writes.record_memory(
+        request.text, person_id=person_id, person_name=person["name"],
+        relationship=person["relationship"], scope="person", tags="person",
+    )
     return {"status": "success", "memory_id": mem_id}
 
 @router.post("/people/{person_id}/photo")
 async def set_person_photo(person_id: str, request: PersonPhotoRequest):
-    person = vdb.get_person(person_id)
+    person = store.get_person(person_id)
     if not person:
         raise HTTPException(status_code=404, detail="Person not found")
     photos.save_photo(person_id, request.image_base64)  # thumbnail for "About Me"
     embedding = extract_face_embedding_from_base64(request.image_base64)
     if embedding is None:
         return {"status": "no_face", "message": "No clear face detected. Try a well-lit, front-facing photo."}
-    vdb.set_person_photo(person_id, embedding, person["name"], person["relationship"])
+    writes.set_photo_flag(person_id, person["name"], person["relationship"], embedding)
     return {"status": "success"}
 
 # ----- Calendar events + Web Push reminders -----
 
 @router.get("/events")
 async def get_events():
-    return {"events": reminders.list_events()}
+    return {"events": store.list_events()}
 
 @router.post("/events")
 async def create_event(request: EventRequest):
@@ -301,7 +310,7 @@ async def push_test():
 
 @router.get("/profile")
 async def get_patient_profile():
-    return profile.get_profile()
+    return store.get_profile()
 
 @router.post("/profile")
 async def update_patient_profile(request: ProfileRequest):
@@ -313,9 +322,9 @@ async def journal():
     plus general notes about the patient."""
     try:
         people = []
-        for p in vdb.list_people():
-            people.append({**p, "memories": vdb.list_memories_for_person(p["id"])})
-        return {"people": people, "general": vdb.list_general_memories()}
+        for p in store.list_people():
+            people.append({**p, "memories": store.list_memories_for_person(p["id"])})
+        return {"people": people, "general": store.list_general_memories()}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -325,11 +334,9 @@ async def enroll_memory(request: EnrollMemoryRequest):
     Caregiver App: Add a life-story fact or memory text to ChromaDB.
     """
     try:
-        mem_id = str(uuid.uuid4())
-        vdb.add_memory(
-            memory_id=mem_id,
-            text=request.text,
-            metadata={"date": request.date or "", "tags": request.tags or ""}
+        mem_id = writes.record_memory(
+            request.text, person_id=None, scope="general",
+            tags=request.tags or "", date=request.date or "",
         )
         return {"status": "success", "memory_id": mem_id}
     except Exception as e:
@@ -339,14 +346,14 @@ async def enroll_memory(request: EnrollMemoryRequest):
 async def list_memories():
     """List every life-story memory so the caregiver can verify what's stored."""
     try:
-        return {"memories": vdb.list_memories()}
+        return {"memories": store.list_memories()}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.delete("/memories/{memory_id}")
 async def delete_memory(memory_id: str):
     try:
-        vdb.delete_memory(memory_id)
+        writes.delete_memory(memory_id)
         return {"status": "deleted", "id": memory_id}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -392,96 +399,100 @@ async def synthesize(request: AskRequest):
 
 @router.get("/briefing")
 async def get_daily_briefing():
-    """
-    Gentle morning audio/text summary logic.
-    Could query ChromaDB for today's 'routine' context.
-    """
-    routine_results = vdb.query_memories("morning routine schedule", n_results=1)
-    routine_hint = "No specific schedule."
-    if routine_results['documents'] and len(routine_results['documents'][0]) > 0:
-        routine_hint = routine_results['documents'][0][0]
-        
-    return {"briefing": f"Good morning. Here is what we have: {routine_hint}."}
+    """A warm, concrete morning briefing composed on-device from the patient
+    profile + today's schedule. Deterministic (no LLM) so it's instant and never
+    invents anything."""
+    from datetime import datetime
 
+    now = datetime.now()
+    prof = store.get_profile()
+    first = (prof.get("name") or "").split()[0] if prof.get("name") else ""
+    greeting = f"Good morning, {first}." if first else "Good morning."
+    parts = [greeting, f"Today is {now.strftime('%A, %B %d')}."]
+    schedule = reminders.calendar_summary(now)
+    parts.append("Here is your day:\n" + schedule if schedule else "You have a calm, open day ahead.")
+    return {"briefing": "\n\n".join(parts)}
 
+# ----- Observability -----
 
-@router.get("/events")
-async def get_events():
-    """
-    Returns dementia-related events in Toronto from Eventbrite.
-    """
+@router.get("/health")
+async def health():
+    """Liveness + readiness: model warmup, LLM reachability, store counts.
+    Non-PII — safe to expose over the public funnel."""
+    import requests as _rq
+    from agents.companion import NIM_BASE_URL
+    from tools import audio, vision
+
+    llm = {"reachable": False, "model": None}
     try:
-        import re
-        import time
-        import requests
-        from bs4 import BeautifulSoup
+        r = _rq.get(f"{NIM_BASE_URL}/models", timeout=2)
+        r.raise_for_status()
+        llm = {"reachable": True, "model": r.json()["data"][0]["id"]}
+    except Exception:
+        pass
+    try:
+        counts = {"people": len(store.list_people()), "memories": len(store.list_memories()),
+                  "events": len(store.list_events())}
+    except Exception:
+        counts = {}
+    return {
+        "status": "ok",
+        "models": {"whisper": audio.warmed(), "insightface": vision.warmed()},
+        "llm": llm,
+        "store": counts,
+    }
 
-        BASE_URL = "https://www.eventbrite.ca/d/canada--toronto/dementia/"
-        HEADERS = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-            "Accept-Language": "en-CA,en;q=0.9",
-            "Accept-Encoding": "gzip, deflate, br",
-            "Connection": "keep-alive",
-            "Upgrade-Insecure-Requests": "1",
-            "Sec-Fetch-Dest": "document",
-            "Sec-Fetch-Mode": "navigate",
-            "Sec-Fetch-Site": "none",
-            "Sec-Fetch-User": "?1",
-            "Cache-Control": "max-age=0",
-        }
+@router.get("/traces")
+async def traces(n: int = 20):
+    """Recent companion-turn metrics (retrieved ids/scores, latency, tokens,
+    fallback) + a summary. NO conversation text — that stays in the local JSONL."""
+    from services import observability
+    return {"summary": observability.summary(), "traces": observability.recent_metrics(n)}
 
-        session = requests.Session()
-        session.headers.update(HEADERS)
-        session.get("https://www.eventbrite.ca/", timeout=15)
-        time.sleep(1)
+# ----- Mood check-ins (patient wellbeing) -----
 
-        resp = session.get(BASE_URL, timeout=20)
-        resp.raise_for_status()
-        soup = BeautifulSoup(resp.text, "html.parser")
+MOODS = {"great", "good", "okay", "low", "sad"}
 
-        events = []
-        seen_urls = set()
+@router.post("/mood")
+async def create_mood(request: MoodRequest):
+    if request.mood not in MOODS:
+        raise HTTPException(status_code=400, detail=f"mood must be one of {sorted(MOODS)}")
+    return {"status": "success", **store.add_mood(request.mood, request.note or "")}
 
-        for link in soup.find_all("a", class_="event-card-link"):
-            href = link.get("href", "")
-            if not href or "/e/" not in href:
-                continue
+@router.get("/mood")
+async def get_moods():
+    return {"moods": store.list_moods()}
 
-            clean_url = href.split("?")[0]
-            if clean_url in seen_urls:
-                continue
-            seen_urls.add(clean_url)
+@router.delete("/mood/{mood_id}")
+async def delete_mood_entry(mood_id: str):
+    store.delete_mood(mood_id)
+    return {"status": "deleted", "id": mood_id}
 
-            h3 = link.find("h3")
-            title = h3.get_text(strip=True) if h3 else link.get("aria-label", "").replace("View ", "")
-            if not title:
-                continue
+# ----- Photo memories (a picture + a caption, read aloud) -----
 
-            event_id_match = re.search(r"-(\d+)$", clean_url)
-            event_id = event_id_match.group(1) if event_id_match else None
+@router.post("/memories/photo")
+async def create_photo_memory(request: PhotoMemoryRequest):
+    """A photo memory = a general memory (its text is the caption) + an on-device
+    thumbnail keyed by the memory id."""
+    if not request.text.strip():
+        raise HTTPException(status_code=400, detail="A caption is required.")
+    mem_id = writes.record_memory(request.text, person_id=None, scope="general", tags="photo")
+    if not photos.save_photo(mem_id, request.image_base64):
+        writes.delete_memory(mem_id)  # roll back the memory if the image won't decode
+        raise HTTPException(status_code=400, detail="Could not read that image.")
+    return {"status": "success", "memory_id": mem_id, "has_photo": True}
 
-            section = link.find_parent("section") or link.find_parent("div")
-            date_text = ""
-            location_text = ""
+@router.get("/memories/{memory_id}/photo")
+async def get_memory_photo(memory_id: str):
+    from fastapi.responses import FileResponse
+    path = photos.photo_path(memory_id)
+    if not path:
+        raise HTTPException(status_code=404, detail="No photo")
+    return FileResponse(path, media_type="image/jpeg")
 
-            if section:
-                for p in section.find_all("p"):
-                    text = p.get_text(strip=True)
-                    if re.search(r"(Mon|Tue|Wed|Thu|Fri|Sat|Sun|Today|Tomorrow|Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)", text):
-                        date_text = text
-                    elif "·" in text:
-                        location_text = text
-
-            events.append({
-                "id": event_id,
-                "title": title,
-                "date": date_text,
-                "location": location_text,
-                "url": clean_url,
-            })
-
-        return {"total": len(events), "events": events}
-
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+@router.get("/photo-journal")
+async def photo_journal():
+    """Memories that have a photo (the patient's Photo Journal)."""
+    items = [{"id": m["id"], "caption": m["text"]}
+             for m in store.list_memories() if photos.photo_path(m["id"])]
+    return {"photos": items}

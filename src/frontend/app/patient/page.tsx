@@ -108,6 +108,67 @@ export default function PatientPage() {
     }
   };
 
+  // --- Daily Briefing (a warm "good morning" summary of today) ---
+  const [briefingOpen, setBriefingOpen] = useState(false);
+  const [briefing, setBriefing] = useState("");
+
+  const openBriefing = async () => {
+    let text = "Good morning.";
+    try {
+      const res = await fetch("/api/briefing", { cache: "no-store" });
+      text = (await res.json()).briefing || text;
+    } catch {
+      /* keep the gentle default */
+    }
+    setBriefing(text);
+    setBriefingOpen(true);
+    speakText(text); // read it aloud, like About Me
+  };
+
+  // --- Mood check-in (how are you feeling today?) ---
+  const MOODS = [
+    { key: "great", emoji: "😊", label: "Great" },
+    { key: "good", emoji: "🙂", label: "Good" },
+    { key: "okay", emoji: "😐", label: "Okay" },
+    { key: "low", emoji: "😟", label: "Low" },
+    { key: "sad", emoji: "😢", label: "Sad" },
+  ];
+  const [moodOpen, setMoodOpen] = useState(false);
+  const [moodLogged, setMoodLogged] = useState(false);
+
+  const openMood = () => {
+    setMoodLogged(false);
+    setMoodOpen(true);
+  };
+
+  const logMood = async (mood: string) => {
+    try {
+      await fetch("/api/mood", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ mood }),
+      });
+    } catch {
+      /* still acknowledge — the patient should never feel an error */
+    }
+    setMoodLogged(true);
+    speakText("Thank you for sharing how you feel. I am right here with you.");
+  };
+
+  // --- Photo Journal (pictures with captions, tap to hear) ---
+  const [photoJournalOpen, setPhotoJournalOpen] = useState(false);
+  const [photoJournal, setPhotoJournal] = useState<{ id: string; caption: string }[]>([]);
+
+  const openPhotoJournal = async () => {
+    try {
+      const res = await fetch("/api/photo-journal", { cache: "no-store" });
+      setPhotoJournal((await res.json()).photos || []);
+    } catch {
+      setPhotoJournal([]);
+    }
+    setPhotoJournalOpen(true);
+  };
+
   // --- About Me (who you are: name, photo, your story, your family) ---
   type Person = { id: string; name: string; relationship: string };
   const [aboutOpen, setAboutOpen] = useState(false);
@@ -498,7 +559,138 @@ export default function PatientPage() {
         >
           📖 Memories
         </button>
+        <button
+          onClick={openBriefing}
+          className="flex-1 min-w-[150px] bg-zinc-800 hover:bg-zinc-700 rounded-3xl py-8 text-2xl md:text-3xl font-medium transition-transform active:scale-95 border border-zinc-700"
+        >
+          🌅 Good Morning
+        </button>
+        <button
+          onClick={openMood}
+          className="flex-1 min-w-[150px] bg-zinc-800 hover:bg-zinc-700 rounded-3xl py-8 text-2xl md:text-3xl font-medium transition-transform active:scale-95 border border-zinc-700"
+        >
+          🙂 How I Feel
+        </button>
+        <button
+          onClick={openPhotoJournal}
+          className="flex-1 min-w-[150px] bg-zinc-800 hover:bg-zinc-700 rounded-3xl py-8 text-2xl md:text-3xl font-medium transition-transform active:scale-95 border border-zinc-700"
+        >
+          📷 Photo Journal
+        </button>
       </div>
+
+      {/* Photo Journal overlay — pictures with captions, tap to hear */}
+      {photoJournalOpen && (
+        <div className="absolute inset-0 z-20 bg-black/95 flex flex-col p-6 overflow-y-auto">
+          <div className="flex items-center justify-between mb-8 max-w-3xl mx-auto w-full">
+            <h2 className="text-3xl md:text-4xl font-medium text-zinc-200">Photo Journal</h2>
+            <button
+              onClick={() => setPhotoJournalOpen(false)}
+              className="text-zinc-200 bg-zinc-800 hover:bg-zinc-700 rounded-full px-6 py-3 text-xl"
+            >
+              Close
+            </button>
+          </div>
+          <div className="max-w-3xl mx-auto w-full">
+            {photoJournal.length === 0 ? (
+              <p className="text-zinc-400 text-center text-xl mt-12">
+                No photo memories yet. Ask your family to add some.
+              </p>
+            ) : (
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-5 pb-10">
+                {photoJournal.map((p) => (
+                  <button
+                    key={p.id}
+                    onClick={() => speakText(p.caption)}
+                    className="text-left bg-zinc-900 hover:bg-zinc-800 border border-zinc-700 rounded-2xl overflow-hidden transition-colors"
+                  >
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img
+                      src={`/api/memories/${p.id}/photo`}
+                      alt={p.caption}
+                      className="w-full h-56 object-cover"
+                    />
+                    <div className="p-5 text-2xl text-zinc-100 leading-relaxed">
+                      {p.caption}
+                      <span className="block text-zinc-500 text-base mt-2">🔊 Tap to hear this</span>
+                    </div>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Mood check-in overlay — tap how you feel */}
+      {moodOpen && (
+        <div className="absolute inset-0 z-30 bg-black/95 flex flex-col items-center justify-center p-8 text-center">
+          {!moodLogged ? (
+            <>
+              <h2 className="text-4xl md:text-5xl font-semibold text-white mb-12">
+                How are you feeling?
+              </h2>
+              <div className="flex flex-wrap gap-6 justify-center max-w-3xl">
+                {MOODS.map((m) => (
+                  <button
+                    key={m.key}
+                    onClick={() => logMood(m.key)}
+                    className="flex flex-col items-center gap-2 bg-zinc-800 hover:bg-zinc-700 rounded-3xl px-8 py-6 active:scale-95 transition-transform border border-zinc-700"
+                  >
+                    <span className="text-6xl">{m.emoji}</span>
+                    <span className="text-2xl font-medium">{m.label}</span>
+                  </button>
+                ))}
+              </div>
+              <button
+                onClick={() => setMoodOpen(false)}
+                className="mt-12 text-xl text-zinc-400 hover:text-white"
+              >
+                Close
+              </button>
+            </>
+          ) : (
+            <>
+              <div className="text-8xl mb-6">💚</div>
+              <h2 className="text-4xl md:text-5xl font-semibold text-white mb-12 max-w-2xl">
+                Thank you for sharing.
+              </h2>
+              <button
+                onClick={() => setMoodOpen(false)}
+                className="bg-emerald-600 hover:bg-emerald-500 text-white text-3xl font-bold rounded-full px-16 py-8 shadow-2xl active:scale-95 transition-transform"
+              >
+                ✓ Done
+              </button>
+            </>
+          )}
+        </div>
+      )}
+
+      {/* Daily Briefing overlay — a warm summary of today */}
+      {briefingOpen && (
+        <div className="absolute inset-0 z-20 bg-black/95 flex flex-col p-6 overflow-y-auto">
+          <div className="flex items-center justify-between mb-8 max-w-2xl mx-auto w-full">
+            <h2 className="text-3xl md:text-4xl font-medium text-zinc-200">Your Daily Briefing</h2>
+            <button
+              onClick={() => setBriefingOpen(false)}
+              className="text-zinc-200 bg-zinc-800 hover:bg-zinc-700 rounded-full px-6 py-3 text-xl"
+            >
+              Close
+            </button>
+          </div>
+          <div className="max-w-2xl mx-auto w-full space-y-8 pb-10">
+            <p className="text-2xl md:text-3xl text-zinc-100 leading-relaxed whitespace-pre-line">
+              {briefing}
+            </p>
+            <button
+              onClick={() => speakText(briefing)}
+              className="w-full bg-emerald-700 hover:bg-emerald-600 rounded-2xl py-6 text-2xl font-medium text-white transition-colors"
+            >
+              🔊 Read it again
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* About Me overlay — who you are */}
       {aboutOpen && (

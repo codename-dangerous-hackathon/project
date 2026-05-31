@@ -1,76 +1,39 @@
-import sqlite3
+"""
+SQLite foundation for Belong's structured data (Phase 2 — Memory & data system).
+
+This is the source of truth for *typed* facts — people, relationships, events,
+profile, and memory rows + provenance. ChromaDB remains the semantic index over
+memory text (see database/chroma_manager.py). Nothing reads from this module yet;
+it is introduced additively (Phase 2 Step 1) ahead of the store facade.
+
+Design notes:
+  * Connection-per-call. The FastAPI app and the 20s scheduler thread both touch
+    this, and a single sqlite3 connection isn't safe to share across threads.
+    get_connection() hands back a fresh connection with FK enforcement on.
+  * Migrations run on every get_connection() but are idempotent and cheap — a
+    DB already at the latest PRAGMA user_version is left untouched (one PRAGMA
+    read). This is deliberately keyed on the *connection's* version rather than a
+    process-global flag, so tests that redirect DB_PATH to a fresh tmp file get a
+    correctly-migrated DB (mirrors how the Chroma singleton is swapped in
+    conftest.py).
+  * DB_PATH is a module-level constant so tests can monkeypatch it to tmp_path.
+"""
 import os
+import sqlite3
 
-DB_PATH = os.path.join(os.path.dirname(__file__), "data", "anchor_local.db")
+from database import migrations
 
-def init_db():
-    """Initializes the local SQLite database for relational metadata."""
+_BASE = os.path.dirname(os.path.dirname(__file__))  # src/backend
+DB_PATH = os.path.join(_BASE, "database", "data", "belong.db")
+
+
+def get_connection() -> sqlite3.Connection:
+    """A fresh SQLite connection (row access + foreign keys on), migrated to the
+    latest schema. Caller is responsible for closing it (use as a context
+    manager or call .close())."""
     os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
-    
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-
-    # Create Caregivers Table
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS caregivers (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            name TEXT NOT NULL,
-            relationship TEXT NOT NULL,
-            phone_number TEXT
-        )
-    """)
-
-    # Create Patients Table
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS patients (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            name TEXT NOT NULL,
-            primary_caregiver_id INTEGER,
-            FOREIGN KEY(primary_caregiver_id) REFERENCES caregivers(id)
-        )
-    """)
-
-    # Create Appointments Table (For Daily Briefing)
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS appointments (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            patient_id INTEGER,
-            time_str TEXT NOT NULL,
-            description TEXT NOT NULL,
-            FOREIGN KEY(patient_id) REFERENCES patients(id)
-        )
-    """)
-
-    # Create Mood Logs (Privacy-preserving daily rollup)
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS mood_logs (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            patient_id INTEGER,
-            timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
-            mood_category TEXT NOT NULL,  -- Good, OK, Not great
-            notes TEXT,
-            FOREIGN KEY(patient_id) REFERENCES patients(id)
-        )
-    """)
-
-    # Create Enrolled Faces metadata mappings (links VectorDB entry to a person name)
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS enrolled_faces (
-            id TEXT PRIMARY KEY, -- Maps to ChromaDB ID
-            name TEXT NOT NULL,
-            relationship TEXT NOT NULL,
-            caregiver_id INTEGER,
-            FOREIGN KEY(caregiver_id) REFERENCES caregivers(id)
-        )
-    """)
-
-    conn.commit()
-    conn.close()
-
-# Initialize DB on load
-init_db()
-
-def get_db_connection():
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA foreign_keys = ON")
+    migrations.run_migrations(conn)
     return conn

@@ -7,6 +7,9 @@ patient's own, on their own device; it's for them to see themselves).
 import json
 import os
 import threading
+from datetime import datetime
+
+from database import store  # SQLite mirror (Phase 2 dual-write); get_profile stays on JSON
 
 _BASE = os.path.dirname(os.path.dirname(__file__))  # src/backend
 _DATA = os.path.join(_BASE, "data")
@@ -37,4 +40,8 @@ def save_profile(updates: dict) -> dict:
         with open(tmp, "w") as f:
             json.dump(current, f)
         os.replace(tmp, PROFILE_FILE)
+    try:  # mirror the merged result to SQLite (authoritative for reads)
+        store.save_profile(current, updated_at=datetime.now().isoformat())
+    except Exception as e:
+        print(f"[profile] SQLite mirror of save_profile failed (continuing): {e}")
     return current

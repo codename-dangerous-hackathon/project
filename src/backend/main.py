@@ -27,6 +27,16 @@ def _preload_models() -> None:
 
     threading.Thread(target=_bg, daemon=True).start()
 
+    # Phase 2 (transition): mirror the live Chroma + JSON data into the SQLite
+    # store so it stays in sync until the route cutover. Read-only on the old
+    # stores; failures must not block startup.
+    try:
+        from database.backfill import reconcile
+        counts = reconcile()
+        print(f"SQLite store reconciled: {counts}")
+    except Exception as e:
+        print(f"SQLite backfill failed (continuing): {e}")
+
     # Start the reminder scheduler (sends Web Push when events are due).
     try:
         from services.reminders import start_scheduler
