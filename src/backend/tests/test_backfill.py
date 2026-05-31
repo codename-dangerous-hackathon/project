@@ -7,27 +7,13 @@ EphemeralClient singleton (conftest swaps PersistentClient->Ephemeral), so we
 wipe its collections around each test to prevent cross-test leakage. JSON stores
 (events/profile) are already redirected to tmp by conftest.
 """
-import pytest
-
 import database.backfill as backfill
 import database.sqlite_manager as sqlite_manager
 import database.store as store
 from database.chroma_manager import vdb
 from services import profile, reminders
 
-
-def _wipe_chroma():
-    for col in (vdb.people_collection, vdb.memory_collection, vdb.face_collection):
-        ids = col.get().get("ids", []) or []
-        if ids:
-            col.delete(ids=ids)
-
-
-@pytest.fixture(autouse=True)
-def _clean_chroma():
-    _wipe_chroma()
-    yield
-    _wipe_chroma()
+# Chroma is wiped around every test by the conftest autouse fixture.
 
 
 def _seed():

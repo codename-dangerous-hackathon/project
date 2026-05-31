@@ -14,6 +14,8 @@ import time
 import uuid
 from datetime import datetime, timedelta
 
+from database import store  # SQLite mirror (Phase 2 dual-write); readers stay on JSON
+
 _BASE = os.path.dirname(os.path.dirname(__file__))  # src/backend
 _DATA = os.path.join(_BASE, "data")
 os.makedirs(_DATA, exist_ok=True)
@@ -58,6 +60,14 @@ def add_event(ev: dict):
         ev = {**ev, "id": str(uuid.uuid4())}
         events.append(ev)
         _write(EVENTS_FILE, events)
+    try:  # mirror to SQLite (authoritative for reads); JSON stays the rollback copy
+        now = datetime.now().isoformat()
+        prov = store.add_provenance(actor="caregiver", source="manual_entry", entered_at=now)
+        store.upsert_event(ev["id"], ev.get("type", ""), ev.get("title", ""), ev.get("notes", ""),
+                           ev.get("time", ""), ev.get("date", ""), ev.get("recurrence", "once"),
+                           created_at=now, provenance_id=prov)
+    except Exception as e:
+        print(f"[reminders] SQLite mirror of add_event failed (continuing): {e}")
     return ev
 
 
@@ -65,6 +75,10 @@ def delete_event(event_id: str):
     with _lock:
         events = [e for e in _read(EVENTS_FILE, []) if e.get("id") != event_id]
         _write(EVENTS_FILE, events)
+    try:
+        store.delete_event(event_id)
+    except Exception as e:
+        print(f"[reminders] SQLite mirror of delete_event failed (continuing): {e}")
 
 
 # ---- Push subscriptions ----

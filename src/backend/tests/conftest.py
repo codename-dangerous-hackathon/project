@@ -86,4 +86,19 @@ def _isolate_state(tmp_path, monkeypatch):
     monkeypatch.setattr(vision, "warmup", lambda: None)
     monkeypatch.setattr(reminders, "start_scheduler", lambda: None)
 
+    # Wipe the shared in-memory Chroma collections around every test. The
+    # EphemeralClient is a process-wide singleton (the vdb object is built once at
+    # import), so without this, vectors leak between tests — and the startup
+    # reconcile would then import another test's leftover Chroma rows into this
+    # test's fresh SQLite.
+    from database.chroma_manager import vdb
+
+    def _wipe_chroma():
+        for col in (vdb.people_collection, vdb.memory_collection, vdb.face_collection):
+            ids = col.get().get("ids", []) or []
+            if ids:
+                col.delete(ids=ids)
+
+    _wipe_chroma()
     yield
+    _wipe_chroma()

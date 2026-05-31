@@ -162,3 +162,36 @@ def get_profile() -> dict:
     if not r:
         return {k: "" for k in PROFILE_FIELDS}
     return {k: (r[k] or "") for k in PROFILE_FIELDS}
+
+
+def list_memories() -> list[dict]:
+    """Every live memory, in the legacy vdb.list_memories() shape {id,text,date,tags}.
+    `date` maps from event_time (episodic) and is "" for semantic rows."""
+    with closing(sqlite_manager.get_connection()) as conn:
+        rows = conn.execute(
+            "SELECT id, text, event_time, tags FROM memories WHERE superseded_by IS NULL"
+        ).fetchall()
+    return [{"id": r["id"], "text": r["text"], "date": r["event_time"] or "", "tags": r["tags"] or ""}
+            for r in rows]
+
+
+# ----- deletes ---------------------------------------------------------------
+
+def delete_memory(memory_id: str) -> None:
+    with closing(sqlite_manager.get_connection()) as conn:
+        conn.execute("DELETE FROM memories WHERE id = ?", (memory_id,))
+        conn.commit()
+
+
+def delete_person(person_id: str) -> None:
+    """Delete a person; FK ON DELETE CASCADE removes their memories + relationships
+    (foreign_keys is enabled per-connection in sqlite_manager.get_connection)."""
+    with closing(sqlite_manager.get_connection()) as conn:
+        conn.execute("DELETE FROM people WHERE id = ?", (person_id,))
+        conn.commit()
+
+
+def delete_event(event_id: str) -> None:
+    with closing(sqlite_manager.get_connection()) as conn:
+        conn.execute("DELETE FROM events WHERE id = ?", (event_id,))
+        conn.commit()

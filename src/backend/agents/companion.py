@@ -1,6 +1,7 @@
 import os
 from datetime import datetime
 from database.chroma_manager import vdb
+from database import store
 from services import reminders
 from services import profile
 from services import places
@@ -57,8 +58,8 @@ def build_family_context() -> str:
     """A roster of the enrolled family members and the facts about each one,
     so the companion actually knows who 'my sister/brother/daughter' is."""
     lines = []
-    for p in vdb.list_people():
-        facts = " ".join(f["text"] for f in vdb.list_memories_for_person(p["id"]))
+    for p in store.list_people():
+        facts = " ".join(f["text"] for f in store.list_memories_for_person(p["id"]))
         line = f"- {p['name']} is the patient's {p['relationship']}."
         if facts:
             line += f" {facts}"

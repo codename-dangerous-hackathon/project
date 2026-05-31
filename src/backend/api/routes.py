@@ -4,6 +4,8 @@ from pydantic import BaseModel
 from typing import List, Optional
 from agents.companion import ask_companion
 from database.chroma_manager import vdb
+from database import store      # SQLite reads (authoritative for structured data)
+from database import writes     # dual-write coordinator (SQLite + Chroma)
 from tools.audio import transcribe_audio_local, synthesize_speech_local
 from tools.vision import extract_face_embedding_from_base64
 from services import reminders
@@ -89,6 +91,9 @@ async def ask_endpoint(request: AskRequest):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+# LEGACY (back-compat): /enroll, /faces, DELETE /faces/{id} are the old face-only
+# path that never created a people row (the UI uses /people). Left on Chroma; not
+# part of the SQLite cutover.
 @router.post("/enroll")
 async def enroll_face(request: EnrollFaceRequest):
     """
@@ -138,7 +143,8 @@ async def identify_person(request: IdentifyRequest):
                 meta = metadatas[0][0]
                 person_id = ids[0][0]
                 # Pull a warm, remembered fact about this person if we have one.
-                person_mems = vdb.list_memories_for_person(person_id)
+                # (Face match stays on Chroma; the fact comes from SQLite.)
+                person_mems = store.list_memories_for_person(person_id)
                 fact = person_mems[0]["text"] if person_mems else ""
                 return {
                     "match": True,
@@ -161,13 +167,12 @@ async def create_person(request: CreatePersonRequest):
     try:
         if not request.name.strip() or not request.relationship.strip():
             raise HTTPException(status_code=400, detail="Name and relationship are required.")
-        person_id = str(uuid.uuid4())
         if request.image_base64:
-            photos.save_photo(person_id, request.image_base64)  # thumbnail for "About Me"
             embedding = extract_face_embedding_from_base64(request.image_base64)
+            person_id = writes.create_person(request.name, request.relationship,
+                                             has_photo=embedding is not None)
+            photos.save_photo(person_id, request.image_base64)  # thumbnail for "About Me"
             if embedding is None:
-                # Still create the person, just without face recognition.
-                vdb.add_person(person_id, request.name, request.relationship, has_photo=False)
                 return {
                     "status": "no_face",
                     "person_id": person_id,
@@ -175,9 +180,9 @@ async def create_person(request: CreatePersonRequest):
                     "has_photo": False,
                     "message": "Saved — but no clear face was detected, so 'Who is this?' won't recognize them yet. Add a clearer photo anytime.",
                 }
-            vdb.set_person_photo(person_id, embedding, request.name, request.relationship)
+            writes.set_photo_flag(person_id, request.name, request.relationship, embedding)
             return {"status": "success", "person_id": person_id, "name": request.name, "has_photo": True}
-        vdb.add_person(person_id, request.name, request.relationship, has_photo=False)
+        person_id = writes.create_person(request.name, request.relationship, has_photo=False)
         return {"status": "success", "person_id": person_id, "name": request.name, "has_photo": False}
     except HTTPException:
         raise
@@ -187,16 +192,16 @@ async def create_person(request: CreatePersonRequest):
 @router.get("/people")
 async def list_people():
     try:
-        return {"people": vdb.list_people()}
+        return {"people": store.list_people()}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.get("/people/{person_id}")
 async def get_person(person_id: str):
-    person = vdb.get_person(person_id)
+    person = store.get_person(person_id)
     if not person:
         raise HTTPException(status_code=404, detail="Person not found")
-    person["memories"] = vdb.list_memories_for_person(person_id)
+    person["memories"] = store.list_memories_for_person(person_id)
     return person
 
 @router.get("/people/{person_id}/photo")
@@ -211,7 +216,7 @@ async def get_person_photo(person_id: str):
 @router.delete("/people/{person_id}")
 async def delete_person(person_id: str):
     try:
-        vdb.delete_person(person_id)
+        writes.delete_person(person_id)
         photos.delete_photo(person_id)
         return {"status": "deleted", "id": person_id}
     except Exception as e:
@@ -219,38 +224,34 @@ async def delete_person(person_id: str):
 
 @router.post("/people/{person_id}/memories")
 async def add_person_memory(person_id: str, request: PersonMemoryRequest):
-    person = vdb.get_person(person_id)
+    person = store.get_person(person_id)
     if not person:
         raise HTTPException(status_code=404, detail="Person not found")
     if not request.text.strip():
         raise HTTPException(status_code=400, detail="Memory text is required.")
-    mem_id = str(uuid.uuid4())
-    vdb.add_memory(mem_id, request.text, metadata={
-        "person_id": person_id,
-        "person_name": person["name"],
-        "relationship": person["relationship"],
-        "scope": "person",
-        "tags": "person",
-    })
+    mem_id = writes.record_memory(
+        request.text, person_id=person_id, person_name=person["name"],
+        relationship=person["relationship"], scope="person", tags="person",
+    )
     return {"status": "success", "memory_id": mem_id}
 
 @router.post("/people/{person_id}/photo")
 async def set_person_photo(person_id: str, request: PersonPhotoRequest):
-    person = vdb.get_person(person_id)
+    person = store.get_person(person_id)
     if not person:
         raise HTTPException(status_code=404, detail="Person not found")
     photos.save_photo(person_id, request.image_base64)  # thumbnail for "About Me"
     embedding = extract_face_embedding_from_base64(request.image_base64)
     if embedding is None:
         return {"status": "no_face", "message": "No clear face detected. Try a well-lit, front-facing photo."}
-    vdb.set_person_photo(person_id, embedding, person["name"], person["relationship"])
+    writes.set_photo_flag(person_id, person["name"], person["relationship"], embedding)
     return {"status": "success"}
 
 # ----- Calendar events + Web Push reminders -----
 
 @router.get("/events")
 async def get_events():
-    return {"events": reminders.list_events()}
+    return {"events": store.list_events()}
 
 @router.post("/events")
 async def create_event(request: EventRequest):
@@ -301,7 +302,7 @@ async def push_test():
 
 @router.get("/profile")
 async def get_patient_profile():
-    return profile.get_profile()
+    return store.get_profile()
 
 @router.post("/profile")
 async def update_patient_profile(request: ProfileRequest):
@@ -313,9 +314,9 @@ async def journal():
     plus general notes about the patient."""
     try:
         people = []
-        for p in vdb.list_people():
-            people.append({**p, "memories": vdb.list_memories_for_person(p["id"])})
-        return {"people": people, "general": vdb.list_general_memories()}
+        for p in store.list_people():
+            people.append({**p, "memories": store.list_memories_for_person(p["id"])})
+        return {"people": people, "general": store.list_general_memories()}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -325,11 +326,9 @@ async def enroll_memory(request: EnrollMemoryRequest):
     Caregiver App: Add a life-story fact or memory text to ChromaDB.
     """
     try:
-        mem_id = str(uuid.uuid4())
-        vdb.add_memory(
-            memory_id=mem_id,
-            text=request.text,
-            metadata={"date": request.date or "", "tags": request.tags or ""}
+        mem_id = writes.record_memory(
+            request.text, person_id=None, scope="general",
+            tags=request.tags or "", date=request.date or "",
         )
         return {"status": "success", "memory_id": mem_id}
     except Exception as e:
@@ -339,14 +338,14 @@ async def enroll_memory(request: EnrollMemoryRequest):
 async def list_memories():
     """List every life-story memory so the caregiver can verify what's stored."""
     try:
-        return {"memories": vdb.list_memories()}
+        return {"memories": store.list_memories()}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.delete("/memories/{memory_id}")
 async def delete_memory(memory_id: str):
     try:
-        vdb.delete_memory(memory_id)
+        writes.delete_memory(memory_id)
         return {"status": "deleted", "id": memory_id}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
