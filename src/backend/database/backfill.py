@@ -79,3 +79,19 @@ def reconcile() -> dict:
     counts["profile"] = 1
 
     return counts
+
+
+def reconcile_if_first_run() -> dict | None:
+    """Bootstrap SQLite from the legacy Chroma/JSON stores ONLY on a fresh DB.
+
+    After the Step-3 cutover SQLite is the source of truth and writes dual-write,
+    so reconciling on every boot does nothing useful — and is actively harmful:
+    a memory deleted from SQLite whose Chroma vector survived (a best-effort
+    delete that didn't fully take) would be re-imported here as a 'system'
+    memory — i.e. a "deleted" memory resurrecting. So we only reconcile when the
+    store has no people/memories/events (a genuinely fresh DB). Returns the
+    counts when it bootstrapped, or None when it skipped.
+    """
+    if store.list_people() or store.list_memories() or store.list_events():
+        return None
+    return reconcile()

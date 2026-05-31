@@ -31,9 +31,10 @@ def _preload_models() -> None:
     # store so it stays in sync until the route cutover. Read-only on the old
     # stores; failures must not block startup.
     try:
-        from database.backfill import reconcile
-        counts = reconcile()
-        print(f"SQLite store reconciled: {counts}")
+        from database.backfill import reconcile_if_first_run
+        counts = reconcile_if_first_run()
+        print(f"SQLite store bootstrapped from legacy stores: {counts}" if counts
+              else "SQLite store already populated; skipping reconcile.")
     except Exception as e:
         print(f"SQLite backfill failed (continuing): {e}")
 

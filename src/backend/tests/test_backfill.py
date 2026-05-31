@@ -87,3 +87,22 @@ def test_reconcile_on_empty_sources_is_safe():
     assert counts == {"people": 0, "memories": 0, "events": 0, "profile": 1}
     assert store.list_people() == []
     assert store.get_profile()["name"] == ""
+
+
+def test_reconcile_if_first_run_bootstraps_empty_store():
+    # Fresh SQLite + legacy Chroma data -> bootstrap once.
+    vdb.add_person("p1", "Jeremy", "Brother", has_photo=False)
+    vdb.add_memory("m1", "He is smart", {"person_id": "p1", "scope": "person"})
+    counts = backfill.reconcile_if_first_run()
+    assert counts is not None and counts["people"] == 1 and counts["memories"] == 1
+    assert [p["name"] for p in store.list_people()] == ["Jeremy"]
+
+
+def test_reconcile_if_first_run_skips_and_does_not_resurrect():
+    # Non-empty SQLite + an ORPHAN Chroma vector (a memory whose SQLite row was
+    # deleted but whose vector lingered). reconcile must NOT run -> no resurrection.
+    store.upsert_person("p1", "Anna", "Daughter", False, "2026-05-31T00:00:00", "2026-05-31T00:00:00")
+    vdb.add_memory("orphan1", "a deleted fact that lingered in chroma", {"scope": "general"})
+    assert backfill.reconcile_if_first_run() is None
+    assert all(m["text"] != "a deleted fact that lingered in chroma"
+               for m in store.list_general_memories())
