@@ -36,3 +36,7 @@ requests
 python-dotenv
 tqdm
 jupyterlab
+
+# Testing
+pytest                 # Backend test runner
+httpx                  # FastAPI TestClient HTTP backend

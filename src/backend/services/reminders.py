@@ -145,9 +145,11 @@ def _payload_for(e: dict) -> dict:
 def _occurs_on(e: dict, now: datetime) -> bool:
     """Whether event `e` should fire on the calendar day of `now`."""
     rec = e.get("recurrence") or "once"
-    if rec == "daily":
-        return True
     d = e.get("date") or ""
+    # A daily event with no start date keeps the original "always fires" behavior
+    # (back-compat with events created before start dates were respected).
+    if rec == "daily" and not d:
+        return True
     if not d:
         return False
     try:
@@ -155,8 +157,10 @@ def _occurs_on(e: dict, now: datetime) -> bool:
     except ValueError:
         return False
     today = now.date()
-    if ed > today:  # recurrence hasn't started yet
+    if ed > today:  # recurrence hasn't started yet — applies to daily too
         return False
+    if rec == "daily":
+        return True
     if rec == "once":
         return ed == today
     if rec == "weekly":

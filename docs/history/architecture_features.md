@@ -1,5 +1,7 @@
 # Anchor: Advanced AI Features & Architecture
 
+> ⚠️ **Historical design note — original hackathon spec, kept for context.** This captures the *original* plan under the working name **"Anchor."** Some choices changed during the build: the app shipped as **Belong** on **Nemotron Nano 30B** (not Nemotron-Mini-4B) with **Piper** TTS (not FastPitch). For the current system of record, see the root [`README.md`](../../README.md) and [`CLAUDE.md`](../../CLAUDE.md); for forward plans see [`docs/ROADMAP.md`](../ROADMAP.md).
+
 This document describes the core AI-driven features for Anchor, a locally hosted (offline) helper agent for people with dementia. It focuses heavily on privacy, on-device AI models, and therapeutic interactions.
 
 ## 1. The "Infinite Patience" Conversational Loop
