@@ -38,6 +38,7 @@ The repo `codename-dangerous-hackathon/project` is **public**, and real patient 
 - [ ] **Rotate the VAPID keypair** (the old one is compromised the moment it was public): regenerate via `py_vapid`, replace `keys/`, re-subscribe devices.
 - [ ] Investigate the Hermes upstream: `src/frontend/app/v1/[...path]/route.ts` hardcodes off-box IP `10.10.53.32:8643`. Confirm it's local or env-gate it; an off-box LLM breaks the thesis. (The new `privacy-auditor` subagent watches for exactly this.)
 - [ ] Guard rail is already in place: `.claude/hooks/guard-no-secrets.sh` blocks Claude from `git add`/`commit`-ing these paths going forward.
+- [ ] **Also found (2026-05-30):** 17 Playwright **screenshots** under `src/frontend/e2e/screenshots/` are tracked in history and render real patient data (faces, names) — plus the `e2e/report/` HTML. Newly gitignored going forward, but the existing tracked copies need `git rm --cached` + the same history purge. Same leak class as the data/key above.
 
 ---
 
@@ -83,7 +84,7 @@ Today `companion.py` stuffs everything (date, family, schedule, places, RAG) int
 
 ## Phase 4 — UX polish & missing features
 
-- [ ] Build the **Daily Briefing** patient UI (`/briefing` backend already exists).
+- [x] Build the **Daily Briefing** patient UI — done 2026-05-30 (`🌅 Good Morning` overlay on the patient page, reads aloud; backend `/briefing` rewritten to a real on-device greeting+date+schedule briefing; e2e fixme replaced with a passing test; 62 backend tests green).
 - [ ] **Photo Memory Journal** with voice captions (currently text-only).
 - [ ] Accessibility pass for the patient app: larger tap targets, higher contrast, simpler flows, reduced-motion — the actual users have cognitive impairment. This is real engineering, not just CSS.
 - [ ] Caregiver dashboard: surface the new provenance/trace data ("what Belong knows and why").
