@@ -86,7 +86,7 @@ Today `companion.py` stuffs everything (date, family, schedule, places, RAG) int
 
 - [x] **Mood check-in** — done 2026-05-30. SQLite-native (migrations **v2** `mood_logs`); patient `🙂 How I Feel` big-emoji overlay → caregiver `💚 Wellbeing` history tab; `POST/GET/DELETE /mood`; e2e fixme replaced with a passing patient→caregiver flow; 69 backend tests green. (Remaining P0 UI gap: Photo Memory Journal.)
 - [x] Build the **Daily Briefing** patient UI — done 2026-05-30 (`🌅 Good Morning` overlay on the patient page, reads aloud; backend `/briefing` rewritten to a real on-device greeting+date+schedule briefing; e2e fixme replaced with a passing test; 62 backend tests green).
-- [ ] **Photo Memory Journal** with voice captions (currently text-only).
+- [x] **Photo Memory Journal** — done 2026-05-31. Caregiver adds photo+caption (Patient Notes); patient browses a `📷 Photo Journal` overlay, tap to hear the caption (TTS). Photo keyed by memory id (reuses `services/photos`, no schema change); `POST /memories/photo`, `GET /memories/{id}/photo`, `GET /photo-journal`. 71 backend tests green; e2e passing. **All three P0 UI spec-gaps now closed (Daily Briefing, Mood, Photo Journal).**
 - [ ] Accessibility pass for the patient app: larger tap targets, higher contrast, simpler flows, reduced-motion — the actual users have cognitive impairment. This is real engineering, not just CSS.
 - [ ] Caregiver dashboard: surface the new provenance/trace data ("what Belong knows and why").
 
