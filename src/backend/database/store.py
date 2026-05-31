@@ -130,20 +130,30 @@ def get_person(person_id: str) -> dict | None:
             "has_photo": bool(r["has_photo"])}
 
 
+# memory readers carry provenance (who entered the fact, when) so the caregiver
+# UI can show "Belong knows this because you added it on <added_at>".
+_MEM_SELECT = (
+    "SELECT m.id, m.text, m.event_time, m.tags, pv.actor AS added_by, pv.entered_at AS added_at "
+    "FROM memories m LEFT JOIN provenance pv ON m.provenance_id = pv.id"
+)
+
+
 def list_memories_for_person(person_id: str) -> list[dict]:
     with closing(sqlite_manager.get_connection()) as conn:
         rows = conn.execute(
-            "SELECT id, text FROM memories WHERE person_id = ? AND superseded_by IS NULL", (person_id,)
+            _MEM_SELECT + " WHERE m.person_id = ? AND m.superseded_by IS NULL", (person_id,)
         ).fetchall()
-    return [{"id": r["id"], "text": r["text"]} for r in rows]
+    return [{"id": r["id"], "text": r["text"], "added_by": r["added_by"], "added_at": r["added_at"]}
+            for r in rows]
 
 
 def list_general_memories() -> list[dict]:
     with closing(sqlite_manager.get_connection()) as conn:
         rows = conn.execute(
-            "SELECT id, text FROM memories WHERE person_id IS NULL AND superseded_by IS NULL"
+            _MEM_SELECT + " WHERE m.person_id IS NULL AND m.superseded_by IS NULL"
         ).fetchall()
-    return [{"id": r["id"], "text": r["text"]} for r in rows]
+    return [{"id": r["id"], "text": r["text"], "added_by": r["added_by"], "added_at": r["added_at"]}
+            for r in rows]
 
 
 def list_events() -> list[dict]:
@@ -165,14 +175,12 @@ def get_profile() -> dict:
 
 
 def list_memories() -> list[dict]:
-    """Every live memory, in the legacy vdb.list_memories() shape {id,text,date,tags}.
-    `date` maps from event_time (episodic) and is "" for semantic rows."""
+    """Every live memory in the legacy {id,text,date,tags} shape, plus provenance
+    (added_by/added_at). `date` maps from event_time (episodic), "" for semantic."""
     with closing(sqlite_manager.get_connection()) as conn:
-        rows = conn.execute(
-            "SELECT id, text, event_time, tags FROM memories WHERE superseded_by IS NULL"
-        ).fetchall()
-    return [{"id": r["id"], "text": r["text"], "date": r["event_time"] or "", "tags": r["tags"] or ""}
-            for r in rows]
+        rows = conn.execute(_MEM_SELECT + " WHERE m.superseded_by IS NULL").fetchall()
+    return [{"id": r["id"], "text": r["text"], "date": r["event_time"] or "", "tags": r["tags"] or "",
+             "added_by": r["added_by"], "added_at": r["added_at"]} for r in rows]
 
 
 # ----- deletes ---------------------------------------------------------------

@@ -19,8 +19,9 @@ def test_general_memory_shape_dated_and_undated():
         mems = c.get("/memories").json()["memories"]
         by_text = {m["text"]: m for m in mems}
         assert set(by_text) == {"dated fact", "undated fact"}
-        # keys match the legacy vdb.list_memories() shape exactly
-        assert set(by_text["dated fact"]) == {"id", "text", "date", "tags"}
+        # legacy {id,text,date,tags} keys preserved; Step 4 adds provenance fields
+        assert {"id", "text", "date", "tags"} <= set(by_text["dated fact"])
+        assert {"added_by", "added_at"} <= set(by_text["dated fact"])
         assert by_text["dated fact"]["date"] == "2026-05-20"
         assert by_text["dated fact"]["tags"] == "x"
         # undated semantic memory -> date "" (not None)
