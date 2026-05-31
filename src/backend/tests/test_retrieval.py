@@ -73,6 +73,18 @@ def test_retrieve_excludes_superseded():
     assert b not in ids
 
 
+def test_hybrid_beats_sim_only_on_recency_tie():
+    # Win-guard: with equal similarity, the recent episodic must outrank the old
+    # one under the default (tie-breaker) weights, while sim-only treats them as
+    # equal. A weight regression that zeroes recency would fail this.
+    recent = {"sim": 0.6, "text": "went to the museum", "kind": "episodic",
+              "event_time": "2026-05-29", "created_at": None, "use_count": 0}
+    old = {**recent, "event_time": "2024-01-01"}
+    sim_only = {"sim": 1.0, "keyword": 0.0, "recency": 0.0, "frequency": 0.0}
+    assert retrieval._score(recent, "museum", NOW, sim_only) == retrieval._score(old, "museum", NOW, sim_only)
+    assert retrieval._score(recent, "museum", NOW) > retrieval._score(old, "museum", NOW)
+
+
 def test_retrieve_degrades_gracefully(monkeypatch):
     def _boom(*args, **kwargs):
         raise RuntimeError("chroma down")

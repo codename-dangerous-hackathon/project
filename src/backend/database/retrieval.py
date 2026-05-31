@@ -21,7 +21,13 @@ OVERFETCH = 20                 # vector candidates pulled before reranking
 HALF_LIFE_SEMANTIC = 3650.0    # days — durable facts barely decay (~10y)
 HALF_LIFE_EPISODIC = 30.0      # days — dated events fade fast
 USE_COUNT_CAP = 20.0
-WEIGHTS = {"sim": 1.0, "keyword": 0.5, "recency": 0.3, "frequency": 0.2}
+# Vector similarity dominates; keyword/recency/frequency are deliberately small
+# TIE-BREAKERS — they reorder near-equal candidates without overriding a clearly
+# better semantic match. Tuned via scripts/eval_retrieval.py: the original
+# 0.5/0.3/0.2 shifted scores enough to demote correct answers (recall@1 0.90);
+# these tie-breaker weights win the recency/frequency cases cleanly (recall@1 1.0
+# on the synthetic benchmark) — but note that's a synthetic ~10-query set.
+WEIGHTS = {"sim": 1.0, "keyword": 0.12, "recency": 0.10, "frequency": 0.06}
 
 _STOP = {"the", "a", "an", "is", "are", "was", "were", "do", "does", "did", "my", "your",
          "you", "me", "to", "of", "in", "on", "at", "and", "or", "for", "what", "who",
@@ -84,10 +90,16 @@ def _vector_candidates(query: str) -> list[dict]:
     return out
 
 
-def retrieve(query: str, k: int = 3, person_id: str | None = None, now: datetime | None = None) -> list[dict]:
+def retrieve(query: str, k: int = 3, person_id: str | None = None, now: datetime | None = None,
+             weights: dict | None = None, bump: bool = True) -> list[dict]:
     """Top-k reranked memories for `query`, each {id, text, score}. Returns []
-    on any failure (graceful degradation)."""
+    on any failure (graceful degradation).
+
+    `weights` overrides the default rerank weighting (used by the benchmark to
+    compare weight vectors). `bump=False` skips the use_count feedback write (so
+    repeated benchmark runs over the same store stay comparable)."""
     now = now or datetime.now()
+    w = weights or WEIGHTS
     try:
         cands = _vector_candidates(query)
         if not cands:
@@ -103,9 +115,10 @@ def retrieve(query: str, k: int = 3, person_id: str | None = None, now: datetime
             merged.append({**row, "sim": c["sim"], "text": row.get("text") or c["text"]})
         if not merged:
             return []
-        ranked = sorted(((_score(m, query, now), m) for m in merged), key=lambda x: x[0], reverse=True)
+        ranked = sorted(((_score(m, query, now, w), m) for m in merged), key=lambda x: x[0], reverse=True)
         top = ranked[:k]
-        store.bump_memory_usage([m["id"] for _, m in top], now.isoformat())
+        if bump:
+            store.bump_memory_usage([m["id"] for _, m in top], now.isoformat())
         return [{"id": m["id"], "text": m["text"], "score": round(s, 4)} for s, m in top]
     except Exception as e:
         print(f"[retrieval] retrieve failed (returning none): {e}")
