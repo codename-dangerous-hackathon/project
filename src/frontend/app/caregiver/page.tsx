@@ -276,6 +276,9 @@ export default function CaregiverPage() {
   const [profileName, setProfileName] = useState("");
   const [profileTagline, setProfileTagline] = useState("");
   const [profilePhoto, setProfilePhoto] = useState("");
+  const [emergencyName, setEmergencyName] = useState("");
+  const [emergencyPhone, setEmergencyPhone] = useState("");
+  const [medical, setMedical] = useState("");
   const [profileStatus, setProfileStatus] = useState("");
 
   const loadProfile = useCallback(async () => {
@@ -285,6 +288,9 @@ export default function CaregiverPage() {
       setProfileName(p.name || "");
       setProfileTagline(p.tagline || "");
       setProfilePhoto(p.photo || "");
+      setEmergencyName(p.emergency_name || "");
+      setEmergencyPhone(p.emergency_phone || "");
+      setMedical(p.medical || "");
     } catch {
       /* offline */
     }
@@ -297,13 +303,54 @@ export default function CaregiverPage() {
       await fetch("/api/profile", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name: profileName, tagline: profileTagline, photo: profilePhoto }),
+        body: JSON.stringify({
+          name: profileName,
+          tagline: profileTagline,
+          photo: profilePhoto,
+          emergency_name: emergencyName,
+          emergency_phone: emergencyPhone,
+          medical,
+        }),
       });
       setProfileStatus("✅ Saved.");
       setTimeout(() => setProfileStatus(""), 2500);
     } catch {
       setProfileStatus("❌ Could not save.");
     }
+  };
+
+  // Import the emergency contact from the phone (Samsung Internet / Chrome on Android).
+  const importFromContacts = async () => {
+    const nav = navigator as unknown as {
+      contacts?: { select: (p: string[], o: { multiple: boolean }) => Promise<Array<{ name?: string[]; tel?: string[] }>> };
+    };
+    if (!("contacts" in navigator) || !("ContactsManager" in window) || !nav.contacts) {
+      setProfileStatus("⚠️ Picking a contact needs Samsung Internet or Chrome on Android. You can upload a .vcf card instead.");
+      return;
+    }
+    try {
+      const contacts = await nav.contacts.select(["name", "tel"], { multiple: false });
+      const c = contacts?.[0];
+      if (c) {
+        if (c.name?.[0]) setEmergencyName(c.name[0]);
+        if (c.tel?.[0]) setEmergencyPhone(c.tel[0]);
+        setProfileStatus("✅ Imported from your contacts — review and Save Profile.");
+      }
+    } catch {
+      /* user cancelled the picker */
+    }
+  };
+
+  // Import the emergency contact from an exported vCard (.vcf) — works everywhere.
+  const importVCard = async (file: File) => {
+    const text = await file.text();
+    const fn = text.match(/^FN[^:]*:(.+)$/im);
+    const tel = text.match(/^TEL[^:]*:(.+)$/im);
+    const note = text.match(/^NOTE[^:]*:(.+)$/im);
+    if (fn) setEmergencyName(fn[1].trim());
+    if (tel) setEmergencyPhone(tel[1].trim());
+    if (note) setMedical(note[1].trim().replace(/\\n/g, " ")); // vCard may carry medical info in NOTE
+    setProfileStatus(fn || tel || note ? "✅ Imported from card — review and Save Profile." : "⚠️ Couldn't read a name/number from that file.");
   };
 
   // Add-person form
@@ -333,6 +380,12 @@ export default function CaregiverPage() {
   }, []);
 
   useEffect(() => {
+    if (activeTab === "dashboard") {
+      // The dashboard rolls up everything, so pull from every section.
+      load();
+      loadEvents();
+      loadProfile();
+    }
     if (activeTab === "family" || activeTab === "notes") load();
     if (activeTab === "notes") loadProfile();
     if (activeTab === "calendar") {
@@ -341,6 +394,17 @@ export default function CaregiverPage() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeTab]);
+
+  // Derived "today" view for the dashboard.
+  const pad2 = (n: number) => String(n).padStart(2, "0");
+  const now = new Date();
+  const todayStr = `${now.getFullYear()}-${pad2(now.getMonth() + 1)}-${pad2(now.getDate())}`;
+  const nowHM = `${pad2(now.getHours())}:${pad2(now.getMinutes())}`;
+  const todaysEvents = events
+    .filter((e) => occursOn(e, todayStr))
+    .sort((a, b) => a.time.localeCompare(b.time));
+  const nextEvent = todaysEvents.find((e) => e.time >= nowHM);
+  const totalFacts = people.reduce((sum, p) => sum + p.memory_count, 0);
 
   // ---- Family member actions ----
   const handleAddPerson = async (e: React.FormEvent) => {
@@ -406,8 +470,10 @@ export default function CaregiverPage() {
       body: JSON.stringify({ image_base64: base64 }),
     });
     const data = await res.json();
-    if (data.status === "no_face") alert(data.message);
     await load();
+    if (data.status === "no_face") {
+      alert("Photo saved — it will show on the patient's About Me. (No clear face was detected, so 'Who is this?' camera recognition won't use this one.)");
+    }
   };
 
   // ---- General patient notes ----
@@ -476,28 +542,164 @@ export default function CaregiverPage() {
 
         {/* Content */}
         <section className="md:col-span-3">
-          {/* DASHBOARD */}
+          {/* DASHBOARD — a live rollup of every section */}
           {activeTab === "dashboard" && (
             <div className="space-y-6">
-              <h2 className="text-3xl font-semibold tracking-tight border-b pb-4">Today's Summary</h2>
+              <div className="flex items-center justify-between border-b pb-4">
+                <h2 className="text-3xl font-semibold tracking-tight">Daily Dashboard</h2>
+                <span className="text-sm text-zinc-500">
+                  {now.toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric" })}
+                </span>
+              </div>
+
+              {/* Patient identity */}
+              <div className="bg-white border rounded-2xl p-6 shadow-sm flex items-center gap-5">
+                {profilePhoto ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img src={profilePhoto} alt={profileName || "patient"} className="w-20 h-20 rounded-full object-cover border shrink-0" />
+                ) : (
+                  <div className="w-20 h-20 rounded-full bg-zinc-200 flex items-center justify-center text-3xl font-semibold text-zinc-500 shrink-0">
+                    {(profileName || "?")[0]?.toUpperCase()}
+                  </div>
+                )}
+                <div className="min-w-0">
+                  <div className="text-2xl font-semibold">{profileName || "Unnamed patient"}</div>
+                  {profileTagline ? (
+                    <p className="text-zinc-600 mt-1">{profileTagline}</p>
+                  ) : (
+                    <button onClick={() => setActiveTab("notes")} className="text-sm text-blue-600 hover:underline mt-1">
+                      Add a description →
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              {/* Quick stats — each jumps to its section */}
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+                {([
+                  { label: "Family", value: people.length, tab: "family", icon: "👪" },
+                  { label: "Facts stored", value: totalFacts, tab: "family", icon: "🧠" },
+                  { label: "General notes", value: general.length, tab: "notes", icon: "📖" },
+                  { label: "Reminders", value: events.length, tab: "calendar", icon: "🗓️" },
+                ] as const).map((s) => (
+                  <button
+                    key={s.label}
+                    onClick={() => setActiveTab(s.tab)}
+                    className="bg-white border rounded-2xl p-4 shadow-sm text-left hover:border-zinc-400 transition-colors"
+                  >
+                    <div className="text-2xl">{s.icon}</div>
+                    <div className="text-3xl font-semibold mt-1">{s.value}</div>
+                    <div className="text-zinc-500 text-sm">{s.label}</div>
+                  </button>
+                ))}
+              </div>
+
+              {/* Today's schedule */}
               <div className="bg-white border rounded-2xl p-6 shadow-sm">
                 <div className="flex items-center justify-between mb-4">
-                  <h3 className="font-medium text-lg">AI Generated Rollup</h3>
-                  <span className="text-xs text-zinc-500">4:30 PM Update</span>
+                  <h3 className="font-medium text-lg">🗓️ Today&apos;s schedule</h3>
+                  <button onClick={() => setActiveTab("calendar")} className="text-sm text-blue-600 hover:underline">Manage →</button>
                 </div>
-                <p className="text-zinc-600 leading-relaxed">
-                  Helen had a calm morning. She asked where the dog was a few times between 3 PM and 4 PM. We looked at the memory journal at 4:30 PM, which improved her mood. She is currently resting.
-                </p>
+                {todaysEvents.length === 0 ? (
+                  <p className="text-zinc-400 text-sm">Nothing scheduled today.</p>
+                ) : (
+                  <ul className="space-y-2">
+                    {todaysEvents.map((ev) => {
+                      const st = TYPE_STYLE[ev.type] || TYPE_STYLE.family;
+                      const isNext = !!nextEvent && ev.id === nextEvent.id;
+                      const past = ev.time < nowHM;
+                      return (
+                        <li
+                          key={ev.id}
+                          className={`flex items-center gap-3 rounded-lg border px-4 py-3 ${isNext ? "border-zinc-900 bg-zinc-50" : "border-zinc-200"} ${past && !isNext ? "opacity-50" : ""}`}
+                        >
+                          <span className={`text-sm font-mono px-2 py-1 rounded shrink-0 ${st.cls}`}>{st.icon} {ev.time}</span>
+                          <div className="min-w-0">
+                            <div className="font-medium truncate">{ev.title}</div>
+                            {ev.notes && <div className="text-zinc-400 text-xs truncate">{ev.notes}</div>}
+                          </div>
+                          {isNext && <span className="ml-auto shrink-0 text-xs font-medium text-amber-900 bg-amber-200 rounded-full px-2 py-0.5">Up next</span>}
+                        </li>
+                      );
+                    })}
+                  </ul>
+                )}
               </div>
-              <div className="grid grid-cols-2 gap-4">
-                <div className="bg-emerald-50 border border-emerald-100 rounded-2xl p-6 shadow-sm">
-                  <div className="text-emerald-800 font-medium mb-1">Morning Mood</div>
-                  <div className="text-3xl">😊 Good</div>
+
+              {/* Emergency contact + medical notes */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div className="bg-rose-50 border border-rose-100 rounded-2xl p-6 shadow-sm">
+                  <div className="flex items-center justify-between mb-2">
+                    <h3 className="font-medium text-rose-900">🚨 Emergency contact</h3>
+                    <button onClick={() => setActiveTab("notes")} className="text-xs text-rose-700 hover:underline">Edit</button>
+                  </div>
+                  {emergencyName || emergencyPhone ? (
+                    <>
+                      <div className="text-lg font-semibold text-rose-900">{emergencyName || "—"}</div>
+                      {emergencyPhone && <a href={`tel:${emergencyPhone}`} className="text-rose-700 hover:underline">{emergencyPhone}</a>}
+                    </>
+                  ) : (
+                    <p className="text-rose-700/70 text-sm">No emergency contact set.</p>
+                  )}
                 </div>
-                <div className="bg-amber-50 border border-amber-100 rounded-2xl p-6 shadow-sm">
-                  <div className="text-amber-800 font-medium mb-1">Afternoon Mood</div>
-                  <div className="text-3xl">😐 OK</div>
+                <div className="bg-white border rounded-2xl p-6 shadow-sm">
+                  <h3 className="font-medium mb-2">🩺 Medical notes</h3>
+                  {medical ? (
+                    <p className="text-zinc-600 text-sm whitespace-pre-wrap">{medical}</p>
+                  ) : (
+                    <p className="text-zinc-400 text-sm">None recorded.</p>
+                  )}
                 </div>
+              </div>
+
+              {/* Family at a glance */}
+              <div className="bg-white border rounded-2xl p-6 shadow-sm">
+                <div className="flex items-center justify-between mb-4">
+                  <h3 className="font-medium text-lg">👪 Family at a glance</h3>
+                  <button onClick={() => setActiveTab("family")} className="text-sm text-blue-600 hover:underline">Manage →</button>
+                </div>
+                {people.length === 0 ? (
+                  <p className="text-zinc-400 text-sm">No family members yet.</p>
+                ) : (
+                  <ul className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    {people.map((p) => (
+                      <li key={p.id} className="flex items-center gap-3 border rounded-xl p-3">
+                        {p.has_photo ? (
+                          // eslint-disable-next-line @next/next/no-img-element
+                          <img src={`/api/people/${p.id}/photo`} alt={p.name} className="w-10 h-10 rounded-full object-cover border shrink-0" />
+                        ) : (
+                          <div className="w-10 h-10 rounded-full bg-zinc-200 flex items-center justify-center text-zinc-500 font-semibold shrink-0">
+                            {p.name[0]?.toUpperCase()}
+                          </div>
+                        )}
+                        <div className="min-w-0">
+                          <div className="font-medium truncate">
+                            {p.name} <span className="text-zinc-500 font-normal">· {p.relationship}</span>
+                          </div>
+                          <div className="text-xs text-zinc-400">{p.memory_count} {p.memory_count === 1 ? "fact" : "facts"}</div>
+                        </div>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+
+              {/* Recent general notes */}
+              <div className="bg-white border rounded-2xl p-6 shadow-sm">
+                <div className="flex items-center justify-between mb-4">
+                  <h3 className="font-medium text-lg">📖 Recent notes</h3>
+                  <button onClick={() => setActiveTab("notes")} className="text-sm text-blue-600 hover:underline">Manage →</button>
+                </div>
+                {general.length === 0 ? (
+                  <p className="text-zinc-400 text-sm">No general notes yet.</p>
+                ) : (
+                  <ul className="space-y-2">
+                    {general.slice(0, 5).map((m) => (
+                      <li key={m.id} className="text-sm text-zinc-700 bg-zinc-50 border rounded-lg px-4 py-2">{m.text}</li>
+                    ))}
+                    {general.length > 5 && <li className="text-xs text-zinc-400">+{general.length - 5} more in Patient Notes</li>}
+                  </ul>
+                )}
               </div>
             </div>
           )}
@@ -604,18 +806,18 @@ export default function CaregiverPage() {
                               <button onClick={() => handleAddFact(p.id)} className="bg-zinc-900 text-white text-sm font-medium px-4 rounded-lg hover:bg-zinc-800">Add</button>
                             </div>
 
-                            {/* Add a photo if they don't have one */}
-                            {!p.has_photo && (
-                              <label className="block text-sm text-zinc-600">
-                                Add a photo to enable face recognition:
-                                <input
-                                  type="file"
-                                  accept="image/*"
-                                  onChange={(e) => { const f = e.target.files?.[0]; if (f) handleAddPhotoToPerson(p.id, f); }}
-                                  className="mt-1 block w-full text-sm file:mr-3 file:py-1.5 file:px-3 file:rounded-full file:border-0 file:text-xs file:font-semibold file:bg-zinc-200"
-                                />
-                              </label>
-                            )}
+                            {/* Add or replace the photo (shows on the patient's About Me + enables recognition) */}
+                            <label className="block text-sm text-zinc-600">
+                              {p.has_photo
+                                ? "📷 Replace photo (shows on the patient's About Me):"
+                                : "📷 Add a photo (shows on About Me + enables face recognition):"}
+                              <input
+                                type="file"
+                                accept="image/*"
+                                onChange={(e) => { const f = e.target.files?.[0]; if (f) handleAddPhotoToPerson(p.id, f); }}
+                                className="mt-1 block w-full text-sm file:mr-3 file:py-1.5 file:px-3 file:rounded-full file:border-0 file:text-xs file:font-semibold file:bg-zinc-200"
+                              />
+                            </label>
                           </div>
                         )}
                       </li>
@@ -827,6 +1029,48 @@ export default function CaregiverPage() {
                       className="w-full border rounded-lg px-4 py-2 bg-zinc-50 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-zinc-900 file:text-white"
                     />
                   </div>
+
+                  {/* Emergency contact + medical (with import from the phone) */}
+                  <div className="border-t pt-4 space-y-3">
+                    <div className="flex items-center justify-between flex-wrap gap-2">
+                      <span className="text-sm font-semibold text-zinc-700">Emergency contact</span>
+                      <div className="flex items-center gap-2">
+                        <button type="button" onClick={importFromContacts} className="text-xs bg-zinc-200 hover:bg-zinc-300 rounded-lg px-3 py-1.5 font-medium">
+                          📇 Import from phone
+                        </button>
+                        <label className="text-xs bg-zinc-200 hover:bg-zinc-300 rounded-lg px-3 py-1.5 font-medium cursor-pointer">
+                          Upload .vcf
+                          <input
+                            type="file"
+                            accept=".vcf,text/vcard"
+                            className="hidden"
+                            onChange={(e) => { const f = e.target.files?.[0]; if (f) importVCard(f); }}
+                          />
+                        </label>
+                      </div>
+                    </div>
+                    <input
+                      type="text"
+                      value={emergencyName}
+                      onChange={(e) => setEmergencyName(e.target.value)}
+                      className="w-full border rounded-lg px-4 py-2 bg-zinc-50 focus:ring-2 outline-none"
+                      placeholder="Emergency contact name — e.g. John (son)"
+                    />
+                    <input
+                      type="tel"
+                      value={emergencyPhone}
+                      onChange={(e) => setEmergencyPhone(e.target.value)}
+                      className="w-full border rounded-lg px-4 py-2 bg-zinc-50 focus:ring-2 outline-none"
+                      placeholder="Emergency phone — e.g. +1 416 555 0123"
+                    />
+                    <textarea
+                      value={medical}
+                      onChange={(e) => setMedical(e.target.value)}
+                      className="w-full border rounded-lg px-4 py-2 bg-zinc-50 focus:ring-2 outline-none min-h-[70px]"
+                      placeholder="Medical notes (optional) — allergies, conditions, blood type…"
+                    />
+                  </div>
+
                   <button type="submit" className="bg-zinc-900 text-white font-medium px-6 py-3 rounded-lg hover:bg-zinc-800 transition-colors">
                     Save Profile
                   </button>

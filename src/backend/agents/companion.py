@@ -3,6 +3,7 @@ from datetime import datetime
 from database.chroma_manager import vdb
 from services import reminders
 from services import profile
+from services import places
 
 # Pseudo-code / NIM API compatibility setup setup
 # Assuming standard OpenAI formatting to hit a local NVIDIA NIM endpoint
@@ -41,6 +42,7 @@ RULES (STRICT):
 4. CONTEXTUAL: Use the provided memory facts to ground your response, but do it naturally like a friend chatting.
 5. SHORT: Keep your answers very short (1-3 sentences) so they can be spoken clearly by TTS.
 6. NEVER INVENT: Only state names, relationships, jobs, places, or facts that appear in the context below. If the information isn't there, do NOT make up a name or detail — gently say you're not certain while staying warm (e.g. "I'm not quite sure about that, but I'm right here with you."). Never guess who someone is.
+7. LANGUAGE: Always reply in the SAME language the user spoke or wrote in. If they speak French, reply in French; if Spanish, reply in Spanish; if English, reply in English. Match their language naturally.
 """
 
 def fetch_revelant_memories(user_query: str) -> str:
@@ -63,7 +65,7 @@ def build_family_context() -> str:
         lines.append(line)
     return "\n".join(lines)
 
-def ask_companion(user_input: str, history=None) -> str:
+def ask_companion(user_input: str, history=None, location=None) -> str:
     """
     Main entry point for the infinite-patience conversational loop.
     Fetches RAG context, includes prior turns for a real discussion, and hits
@@ -71,6 +73,8 @@ def ask_companion(user_input: str, history=None) -> str:
 
     history: optional list of {"role": "user"|"assistant", "content": str} from
     earlier in this conversation, so the companion can actually follow along.
+    location: optional {"lat","lng"} so the companion can answer "where is the
+    nearest washroom / care home?" using the Toronto places tool.
     """
     # 1. Build grounding context: today's date, family roster, the schedule, memories.
     now = datetime.now()
@@ -84,6 +88,26 @@ def ask_companion(user_input: str, history=None) -> str:
         if prof.get("tagline"):
             who += f". About them: {prof['tagline']}"
         parts.append(who + ".")
+    extra = []
+    if prof.get("emergency_name"):
+        ec = f"In an emergency, their contact is {prof['emergency_name']}"
+        if prof.get("emergency_phone"):
+            ec += f" at {prof['emergency_phone']}"
+        extra.append(ec + ".")
+    if prof.get("medical"):
+        extra.append(f"Medical notes: {prof['medical']}.")
+    if extra:
+        parts.append(" ".join(extra))
+    if location:
+        try:
+            nearby = places.nearby_summary(location["lat"], location["lng"])
+            if nearby:
+                parts.append(
+                    "NEARBY PLACES around the patient right now — use these to answer "
+                    "'where is the nearest washroom / toilet / care home?':\n" + nearby
+                )
+        except Exception as e:
+            print(f"places lookup failed: {e}")
     if family:
         parts.append("KNOWN FAMILY MEMBERS (the only people you may name):\n" + family)
     if calendar:

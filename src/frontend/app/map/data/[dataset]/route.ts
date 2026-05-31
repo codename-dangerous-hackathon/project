@@ -12,9 +12,16 @@ type Source = {
   url: string;
   // Map a GeoJSON feature's raw properties to the fields the popup shows.
   fields: (p: Record<string, unknown>) => Record<string, string>;
+  // Optional filter to keep only some features (e.g. only Community Centres).
+  filter?: (p: Record<string, unknown>) => boolean;
 };
 
 const s = (v: unknown) => (v == null ? "" : String(v).trim());
+// ALL-CAPS dataset names -> friendlier title case.
+const nice = (v: unknown) => {
+  const x = s(v);
+  return x && x === x.toUpperCase() ? x.toLowerCase().replace(/\b\w/g, (c) => c.toUpperCase()) : x;
+};
 
 const SOURCES: Record<string, Source> = {
   washrooms: {
@@ -44,6 +51,21 @@ const SOURCES: Record<string, Source> = {
       phone: s(p.TELEPHONE),
       respite: s(p.RESPITE),
       adult_day_program: s(p.ADULT_DAY_PROGRAM),
+    }),
+  },
+  reccentres: {
+    url:
+      "https://ckan0.cf.opendata.inter.prod-toronto.ca/dataset/" +
+      "cbea3a67-9168-4c6d-8186-16ac1a795b5b/resource/" +
+      "f6cdcd50-da7b-4ede-8e60-c3cdba70b559/download/parks-and-recreation-facilities-4326.geojson",
+    // Dataset mixes Parks + Community Centres — keep only the centres.
+    filter: (p) => s(p.TYPE).toLowerCase() === "community centre",
+    fields: (p) => ({
+      name: nice(p.ASSET_NAME) || "Community Centre",
+      address: nice(p.ADDRESS),
+      amenities: s(p.AMENITIES) === "None" ? "" : s(p.AMENITIES),
+      phone: s(p.PHONE) === "None" ? "" : s(p.PHONE),
+      url: s(p.URL),
     }),
   },
 };
@@ -81,6 +103,7 @@ export async function GET(
 
   const points: Point[] = [];
   for (const f of geo.features ?? []) {
+    if (src.filter && !src.filter(f.properties ?? {})) continue;
     for (const c of coordsOf(f.geometry)) {
       const lng = Number(c?.[0]);
       const lat = Number(c?.[1]);

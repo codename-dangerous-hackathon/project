@@ -14,10 +14,17 @@ const BASE_URL = "/v1"; // proxied same-origin to Hermes (no CORS, no 403)
 const MODEL = "hermes-agent";
 const API_KEY = ""; // bearer token if you later enable auth on the gateway
 const SYSTEM = ""; // optional system prompt prepended to every conversation
+// Auto-greeting on open: a hidden prompt asks the LLM to greet, so the opening
+// line reflects the Belong persona + injected memories/schedule. STATIC_GREETING
+// is shown if the model is unreachable, so the screen is never blank or scary.
+const GREETING_PROMPT =
+  "The patient has just opened the chat. Greet them warmly in one or two short sentences to gently start the conversation.";
+const STATIC_GREETING = "Hello, I'm Belong. I'm right here with you. How are you feeling today?";
 // =================================================
 
 export default function HermesPage() {
   const rootRef = useRef<HTMLDivElement | null>(null);
+  const startedRef = useRef(false);
 
   useEffect(() => {
     const root = rootRef.current;
@@ -62,14 +69,10 @@ export default function HermesPage() {
     }
     ping();
 
-    async function sendMessage() {
-      const content = text.value.trim();
-      if (!content) return;
-      text.value = "";
-      autoGrow();
-      addBubble("user", content);
-      history.push({ role: "user", content });
-
+    // Stream one assistant reply for the current `history`. On error, shows
+    // `fallback` as a normal bubble if given (used by the greeting), else an
+    // error bubble. Returns whether it succeeded.
+    async function streamAssistant(opts: { fallback?: string } = {}) {
       send.disabled = true;
       const bubble = addBubble("bot", "");
       const cursor = document.createElement("span");
@@ -116,15 +119,39 @@ export default function HermesPage() {
         cursor.remove();
         if (!acc) bubble.textContent = "(empty response)";
         history.push({ role: "assistant", content: acc });
+        return true;
       } catch (e) {
         cursor.remove();
-        bubble.className = "hc-bubble err";
-        bubble.textContent = "Error: " + (e as Error).message;
-        history.pop(); // drop the user turn so retry is clean
+        if (opts.fallback) {
+          bubble.textContent = opts.fallback; // never show the patient a raw error
+          history.push({ role: "assistant", content: opts.fallback });
+        } else {
+          bubble.className = "hc-bubble err";
+          bubble.textContent = "Error: " + (e as Error).message;
+        }
+        return false;
       } finally {
         send.disabled = false;
         text.focus();
       }
+    }
+
+    async function sendMessage() {
+      const content = text.value.trim();
+      if (!content) return;
+      text.value = "";
+      autoGrow();
+      addBubble("user", content);
+      history.push({ role: "user", content });
+      const ok = await streamAssistant();
+      if (!ok) history.pop(); // drop the user turn so retry is clean
+    }
+
+    // Greet the patient on open by prompting the LLM (hidden user turn, so the
+    // first visible bubble is the assistant's warm hello).
+    async function autoGreet() {
+      history.push({ role: "user", content: GREETING_PROMPT });
+      await streamAssistant({ fallback: STATIC_GREETING });
     }
 
     function autoGrow() {
@@ -145,6 +172,12 @@ export default function HermesPage() {
     text.addEventListener("keydown", onKeydown);
     send.addEventListener("click", onSend);
 
+    // Open with a warm greeting (once).
+    if (!startedRef.current) {
+      startedRef.current = true;
+      autoGreet();
+    }
+
     return () => {
       text.removeEventListener("input", onInput);
       text.removeEventListener("keydown", onKeydown);
@@ -157,10 +190,11 @@ export default function HermesPage() {
       {/* All styles scoped under #hermes-chat so nothing leaks into the rest of the app. */}
       <style>{`
         #hermes-chat {
-          --bg: #0f1115; --panel: #171a21; --bubble-user: #2563eb; --bubble-bot: #232733;
-          --text: #e6e8ee; --muted: #8a93a6; --border: #2a2f3a; --accent: #4ade80;
+          --field: #ffffff; --panel: rgba(255,255,255,0.75); --bubble-user: #4aacaa; --bubble-bot: #ffffff;
+          --text: #14302f; --muted: #5b6b6a; --border: #cfe6e4; --accent: #2c8f8d;
           font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
-          color: var(--text); background: var(--bg);
+          color: var(--text);
+          background: linear-gradient(to bottom, #4aacaa 0%, #ffffff 100%);
           display: flex; flex-direction: column; height: 100%; min-height: 0;
           box-sizing: border-box;
         }
@@ -175,7 +209,7 @@ export default function HermesPage() {
           background: var(--bubble-bot); border: 1px solid var(--border);
           border-radius: 10px; padding: 8px 14px; min-height: 44px;
         }
-        #hermes-chat .hc-back:hover { background: #2c3240; }
+        #hermes-chat .hc-back:hover { background: #e6f6f5; }
         #hermes-chat .hc-back:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
         #hermes-chat .hc-title { font-size: 18px; }
         #hermes-chat .hc-dot { width: 9px; height: 9px; border-radius: 50%; background: var(--muted); }
@@ -189,9 +223,10 @@ export default function HermesPage() {
         #hermes-chat .hc-bubble {
           max-width: 78%; padding: 10px 13px; border-radius: 14px; line-height: 1.45;
           white-space: pre-wrap; word-wrap: break-word; background: var(--bubble-bot);
+          border: 1px solid var(--border); box-shadow: 0 1px 2px rgba(20,48,47,0.06);
         }
-        #hermes-chat .hc-row.user .hc-bubble { background: var(--bubble-user); color: #fff; }
-        #hermes-chat .hc-bubble.err { background: #3a1d1d; color: #ffb4b4; }
+        #hermes-chat .hc-row.user .hc-bubble { background: var(--bubble-user); color: #fff; border-color: var(--bubble-user); }
+        #hermes-chat .hc-bubble.err { background: #fdecec; color: #b42318; border-color: #f3c0c0; }
         #hermes-chat .hc-cursor { display: inline-block; width: 7px; height: 1em; background: var(--accent);
           vertical-align: text-bottom; animation: hc-blink 1s steps(2) infinite; }
         @keyframes hc-blink { 0%,50% { opacity: 1 } 50.01%,100% { opacity: 0 } }
@@ -199,10 +234,11 @@ export default function HermesPage() {
           border-top: 1px solid var(--border); padding: 12px; display: flex; gap: 8px; background: var(--panel);
         }
         #hermes-chat textarea {
-          flex: 1; resize: none; background: var(--bg); color: var(--text);
+          flex: 1; resize: none; background: var(--field); color: var(--text);
           border: 1px solid var(--border); border-radius: 10px; padding: 10px 12px;
           font: inherit; max-height: 160px; outline: none;
         }
+        #hermes-chat textarea::placeholder { color: var(--muted); }
         #hermes-chat textarea:focus { border-color: var(--bubble-user); }
         #hermes-chat button {
           background: var(--bubble-user); color: #fff; border: 0; border-radius: 10px;

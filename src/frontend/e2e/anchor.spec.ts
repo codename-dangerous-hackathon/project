@@ -145,7 +145,7 @@ test.describe("Caregiver — portal", () => {
     await page.getByRole("button", { name: "Patient Notes" }).click();
 
     const note = `Helen grew up in Scarborough ${Date.now()}`;
-    await page.locator("textarea").fill(note);
+    await page.getByPlaceholder(/grew up in Scarborough/).fill(note);
     await page.getByRole("button", { name: "Save Note" }).click();
 
     await expect(page.getByText("Saved to the offline vault.")).toBeVisible();
@@ -249,6 +249,32 @@ test.describe("Backend API contract (via /api proxy)", () => {
     expect((await r.json()).text.toLowerCase()).toContain("sarah");
   });
 
+  test("STT auto-detects language — transcribes French speech as French", async ({
+    request,
+  }) => {
+    const wav = fs.readFileSync("e2e/fixtures/voice_fr.wav");
+    const r = await request.post("/api/transcribe", {
+      timeout: 30_000,
+      multipart: { file: { name: "fr.wav", mimeType: "audio/wav", buffer: wav } },
+    });
+    expect(r.status()).toBe(200);
+    const text = (await r.json()).text.toLowerCase();
+    // Real French words must appear (proves it's not forcing English).
+    expect(text).toMatch(/bonjour|famille|où/);
+  });
+
+  test("TTS speaks back in the text's language (French → French voice, no crash)", async ({
+    request,
+  }) => {
+    const r = await request.post("/api/synthesize", {
+      data: { user_input: "Bonjour, je suis très heureux de vous voir aujourd'hui." },
+      timeout: 30_000,
+    });
+    expect(r.status()).toBe(200);
+    expect(r.headers()["content-type"]).toContain("audio/wav");
+    expect((await r.body()).length).toBeGreaterThan(2000);
+  });
+
   test("person with photo is recognized by name AND a remembered fact", async ({
     request,
   }) => {
@@ -324,6 +350,28 @@ test.describe("Backend API contract (via /api proxy)", () => {
     expect(Array.isArray(data.general)).toBe(true);
   });
 
+  test("family member photo is stored and served for the About Me cards", async ({
+    request,
+  }) => {
+    const A = fs.readFileSync("e2e/fixtures/faceA.jpg").toString("base64");
+    const c = await request.post("/api/people", {
+      data: { name: "PhotoZed", relationship: "cousin", image_base64: A },
+      timeout: 30_000,
+    });
+    const id = (await c.json()).person_id;
+    try {
+      const photo = await request.get(`/api/people/${id}/photo`, { timeout: 15_000 });
+      expect(photo.status()).toBe(200);
+      expect(photo.headers()["content-type"]).toContain("image/jpeg");
+      expect((await photo.body()).length).toBeGreaterThan(1000);
+    } finally {
+      await request.delete(`/api/people/${id}`);
+    }
+    // photo is gone after delete
+    const after = await request.get(`/api/people/${id}/photo`);
+    expect(after.status()).toBe(404);
+  });
+
   test("person lifecycle: create → add fact → list → delete", async ({ request }) => {
     const name = `Probe${Date.now()}`;
     const c = await request.post("/api/people", { data: { name, relationship: "cousin" } });
@@ -393,6 +441,32 @@ test.describe("Backend API contract (via /api proxy)", () => {
     }
   });
 
+  test("emergency contact saves and the companion knows it", async ({ request }) => {
+    const orig = await (await request.get("/api/profile")).json();
+    try {
+      const s = await request.post("/api/profile", {
+        data: { emergency_name: "Bartholomew", emergency_phone: "+1 555 0199" },
+      });
+      expect(s.status()).toBe(200);
+      const saved = await s.json();
+      expect(saved.emergency_name).toBe("Bartholomew");
+      expect(saved.emergency_phone).toBe("+1 555 0199");
+
+      const r = await request.post("/api/ask", {
+        data: { user_input: "Who do I call in an emergency?" },
+        timeout: 60_000,
+      });
+      expect((await r.json()).reply).toContain("Bartholomew");
+    } finally {
+      await request.post("/api/profile", {
+        data: {
+          name: orig.name, tagline: orig.tagline, photo: orig.photo,
+          emergency_name: orig.emergency_name, emergency_phone: orig.emergency_phone, medical: orig.medical,
+        },
+      });
+    }
+  });
+
   test("companion is aware of the calendar (medications/schedule)", async ({ request }) => {
     // Add a distinctively-named medication...
     const c = await request.post("/api/events", {
@@ -409,6 +483,43 @@ test.describe("Backend API contract (via /api proxy)", () => {
     } finally {
       await request.delete(`/api/events/${id}`);
     }
+  });
+
+  test("nearest-place tool + companion answers 'where is the nearest washroom?'", async ({
+    request,
+  }) => {
+    const loc = { lat: 43.6532, lng: -79.3832 }; // downtown Toronto
+    const t = await request.get(
+      `/api/places/nearest?category=washroom&lat=${loc.lat}&lng=${loc.lng}&n=1`,
+      { timeout: 30_000 }
+    );
+    expect(t.status()).toBe(200);
+    const nearest = (await t.json()).results[0];
+    expect(typeof nearest.distance_m).toBe("number");
+    expect(nearest.name).toBeTruthy();
+
+    // The companion uses the location to name the nearest place.
+    const r = await request.post("/api/ask", {
+      data: { user_input: "Where is the nearest washroom?", location: loc },
+      timeout: 60_000,
+    });
+    const reply = (await r.json()).reply as string;
+    const token = nearest.name.split(/\s+/).sort((a: string, b: string) => b.length - a.length)[0];
+    expect(reply.toLowerCase()).toContain(token.toLowerCase());
+  });
+
+  test("map community-centres dataset + nearest community endpoint", async ({ request }) => {
+    const m = await request.get("/map/data/reccentres", { timeout: 30_000 });
+    expect(m.status()).toBe(200);
+    const data = await m.json();
+    expect(data.count).toBeGreaterThan(50);
+    expect(data.points[0].fields.name).toBeTruthy();
+
+    const n = await request.get(
+      "/api/places/nearest?category=community&lat=43.6532&lng=-79.3832&n=1",
+      { timeout: 30_000 }
+    );
+    expect((await n.json()).results.length).toBe(1);
   });
 
   test("GET /api/discover/events returns Eventbrite dementia events", async ({ request }) => {
@@ -560,6 +671,25 @@ test.describe("Stored data views (verify what's saved)", () => {
     await expect(
       page.getByRole("heading", { name: "💊 Time for your Heart Pill" })
     ).not.toBeVisible();
+  });
+});
+
+test.describe("Map — nearby places", () => {
+  test.use({
+    permissions: ["geolocation"],
+    geolocation: { latitude: 43.6532, longitude: -79.3832 }, // downtown Toronto
+  });
+
+  test("shows community-centre layer and finds nearest to me", async ({ page }) => {
+    await page.goto("/map");
+    await expect(page.getByText("Community & Rec Centres")).toBeVisible();
+    const btn = page.getByRole("button", { name: /Nearest to me/ });
+    await expect(btn).toBeVisible();
+
+    await page.waitForTimeout(3000); // let Leaflet initialize
+    await btn.click();
+    await expect(page.getByText("Nearest to you")).toBeVisible({ timeout: 20_000 });
+    await page.screenshot({ path: `${SHOTS}/13-map-nearest.png`, fullPage: true });
   });
 });
 

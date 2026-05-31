@@ -2,7 +2,7 @@ import Link from "next/link";
 
 export default function Home() {
   return (
-    <div className="flex flex-col items-center justify-center min-h-screen p-8 text-center sm:p-20 font-[family-name:var(--font-geist-sans)] dark:bg-black">
+    <div className="flex flex-col items-center justify-center min-h-screen p-8 text-center sm:p-20 font-[family-name:var(--font-geist-sans)] bg-[linear-gradient(to_bottom,#4aacaa_0%,#ffffff_100%)] dark:bg-[linear-gradient(to_bottom,#15605e_0%,#0a0a0a_100%)]">
       {/* eslint-disable-next-line @next/next/no-img-element */}
       <img
         src="/icon-512x512.svg"

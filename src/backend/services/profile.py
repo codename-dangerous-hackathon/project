@@ -14,7 +14,8 @@ os.makedirs(_DATA, exist_ok=True)
 PROFILE_FILE = os.path.join(_DATA, "profile.json")
 
 _lock = threading.Lock()
-_DEFAULT = {"name": "", "tagline": "", "photo": ""}
+_FIELDS = ("name", "tagline", "photo", "emergency_name", "emergency_phone", "medical")
+_DEFAULT = {k: "" for k in _FIELDS}
 
 
 def get_profile() -> dict:
@@ -29,7 +30,7 @@ def get_profile() -> dict:
 def save_profile(updates: dict) -> dict:
     with _lock:
         current = get_profile()
-        for k in ("name", "tagline", "photo"):
+        for k in _FIELDS:
             if k in updates and updates[k] is not None:
                 current[k] = updates[k]
         tmp = PROFILE_FILE + ".tmp"

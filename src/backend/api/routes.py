@@ -9,6 +9,8 @@ from tools.vision import extract_face_embedding_from_base64
 from services import reminders
 from services import eventbrite
 from services import profile
+from services import places
+from services import photos
 import uuid
 
 router = APIRouter()
@@ -22,9 +24,14 @@ class ChatTurn(BaseModel):
     role: str
     content: str
 
+class LatLng(BaseModel):
+    lat: float
+    lng: float
+
 class AskRequest(BaseModel):
     user_input: str
     history: Optional[List[ChatTurn]] = None
+    location: Optional[LatLng] = None  # patient's current location, if shared
 
 class EnrollMemoryRequest(BaseModel):
     text: str
@@ -58,6 +65,9 @@ class ProfileRequest(BaseModel):
     name: Optional[str] = None
     tagline: Optional[str] = None
     photo: Optional[str] = None  # base64 data URL (the patient's own photo)
+    emergency_name: Optional[str] = None
+    emergency_phone: Optional[str] = None
+    medical: Optional[str] = None  # allergies, conditions, blood type, etc.
 
 class PersonMemoryRequest(BaseModel):
     text: str
@@ -73,7 +83,8 @@ async def ask_endpoint(request: AskRequest):
     """
     try:
         history = [turn.model_dump() for turn in request.history] if request.history else None
-        reply = ask_companion(request.user_input, history=history)
+        location = request.location.model_dump() if request.location else None
+        reply = ask_companion(request.user_input, history=history, location=location)
         return {"reply": reply}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -152,6 +163,7 @@ async def create_person(request: CreatePersonRequest):
             raise HTTPException(status_code=400, detail="Name and relationship are required.")
         person_id = str(uuid.uuid4())
         if request.image_base64:
+            photos.save_photo(person_id, request.image_base64)  # thumbnail for "About Me"
             embedding = extract_face_embedding_from_base64(request.image_base64)
             if embedding is None:
                 # Still create the person, just without face recognition.
@@ -187,10 +199,20 @@ async def get_person(person_id: str):
     person["memories"] = vdb.list_memories_for_person(person_id)
     return person
 
+@router.get("/people/{person_id}/photo")
+async def get_person_photo(person_id: str):
+    """Serve the stored thumbnail for a family member (for the About Me cards)."""
+    from fastapi.responses import FileResponse
+    path = photos.photo_path(person_id)
+    if not path:
+        raise HTTPException(status_code=404, detail="No photo")
+    return FileResponse(path, media_type="image/jpeg")
+
 @router.delete("/people/{person_id}")
 async def delete_person(person_id: str):
     try:
         vdb.delete_person(person_id)
+        photos.delete_photo(person_id)
         return {"status": "deleted", "id": person_id}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -217,6 +239,7 @@ async def set_person_photo(person_id: str, request: PersonPhotoRequest):
     person = vdb.get_person(person_id)
     if not person:
         raise HTTPException(status_code=404, detail="Person not found")
+    photos.save_photo(person_id, request.image_base64)  # thumbnail for "About Me"
     embedding = extract_face_embedding_from_base64(request.image_base64)
     if embedding is None:
         return {"status": "no_face", "message": "No clear face detected. Try a well-lit, front-facing photo."}
@@ -237,6 +260,14 @@ async def create_event(request: EventRequest):
 async def delete_event(event_id: str):
     reminders.delete_event(event_id)
     return {"status": "deleted", "id": event_id}
+
+@router.get("/places/nearest")
+async def places_nearest(category: str, lat: float, lng: float, n: int = 3):
+    """Nearest washroom / care home to a location (the agent's location tool)."""
+    try:
+        return {"category": category, "results": places.find_nearest(category, lat, lng, n)}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 @router.get("/discover/events")
 async def discover_events(location: str = "online", q: str = "dementia", limit: int = 20):

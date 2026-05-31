@@ -3,6 +3,27 @@
 import { useState, useRef, useEffect, useCallback } from "react";
 import Link from "next/link";
 
+// Family member avatar — shows the stored photo, falls back to their initial.
+function FamilyAvatar({ id, name }: { id: string; name: string }) {
+  const [err, setErr] = useState(false);
+  if (err) {
+    return (
+      <div className="w-16 h-16 shrink-0 rounded-full bg-zinc-700 flex items-center justify-center text-2xl font-semibold text-zinc-200">
+        {name?.[0]?.toUpperCase() || "?"}
+      </div>
+    );
+  }
+  return (
+    // eslint-disable-next-line @next/next/no-img-element
+    <img
+      src={`/api/people/${id}/photo`}
+      alt={name}
+      onError={() => setErr(true)}
+      className="w-16 h-16 shrink-0 rounded-full object-cover border border-zinc-600"
+    />
+  );
+}
+
 // VAPID public key (base64url) -> Uint8Array for PushManager.subscribe.
 function urlBase64ToUint8Array(base64String: string) {
   const padding = "=".repeat((4 - (base64String.length % 4)) % 4);
@@ -30,6 +51,16 @@ export default function PatientPage() {
   const micStreamRef = useRef<MediaStream | null>(null);
   // Multi-turn history so the companion can actually follow the conversation.
   const historyRef = useRef<{ role: "user" | "assistant"; content: string }[]>([]);
+  // Patient's location (for "where is the nearest washroom / care home?").
+  const locationRef = useRef<{ lat: number; lng: number } | null>(null);
+  const ensureLocation = () => {
+    if (locationRef.current || typeof navigator === "undefined" || !navigator.geolocation) return;
+    navigator.geolocation.getCurrentPosition(
+      (pos) => { locationRef.current = { lat: pos.coords.latitude, lng: pos.coords.longitude }; },
+      () => { /* denied/unavailable — the companion just won't know the location */ },
+      { enableHighAccuracy: false, timeout: 8000, maximumAge: 300000 }
+    );
+  };
 
   // Attach the camera stream once the <video> element is actually mounted.
   // The video is only rendered when status === "camera", so we cannot assign
@@ -80,7 +111,13 @@ export default function PatientPage() {
   // --- About Me (who you are: name, photo, your story, your family) ---
   type Person = { id: string; name: string; relationship: string };
   const [aboutOpen, setAboutOpen] = useState(false);
-  const [profile, setProfile] = useState<{ name?: string; tagline?: string; photo?: string }>({});
+  const [profile, setProfile] = useState<{
+    name?: string;
+    tagline?: string;
+    photo?: string;
+    emergency_name?: string;
+    emergency_phone?: string;
+  }>({});
   const [aboutPeople, setAboutPeople] = useState<Person[]>([]);
   const [aboutGeneral, setAboutGeneral] = useState<Mem[]>([]);
 
@@ -178,6 +215,7 @@ export default function PatientPage() {
 
   const startListening = async () => {
     try {
+      ensureLocation(); // start fetching location while they speak
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       micStreamRef.current = stream;
       audioChunksRef.current = [];
@@ -229,7 +267,11 @@ export default function PatientPage() {
       const askRes = await fetch("/api/ask", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ user_input: heard, history: historyRef.current }),
+        body: JSON.stringify({
+          user_input: heard,
+          history: historyRef.current,
+          location: locationRef.current || undefined,
+        }),
       });
       const { reply } = await askRes.json();
       const answer = reply || "I'm right here with you.";
@@ -338,7 +380,7 @@ export default function PatientPage() {
   };
 
   return (
-    <main className="flex flex-col items-center justify-center w-full min-h-[100dvh] bg-black text-white p-4 font-sans select-none relative">
+    <main className="flex flex-col items-center justify-center w-full min-h-[100dvh] bg-[linear-gradient(to_bottom,#15605e_0%,#000000_60%)] text-white p-4 font-sans select-none relative">
       
       {/* Subtle Home Button in Top Left */}
       <Link href="/" className="absolute top-6 left-6 p-3 text-zinc-600 hover:text-zinc-300 transition-colors bg-zinc-900/50 hover:bg-zinc-800 rounded-full" title="Back to Home">
@@ -496,6 +538,21 @@ export default function PatientPage() {
               </div>
             )}
 
+            {(profile.emergency_name || profile.emergency_phone) && (
+              <div className="space-y-3">
+                <h4 className="text-2xl font-semibold text-amber-300">If you need help</h4>
+                <a
+                  href={profile.emergency_phone ? `tel:${profile.emergency_phone}` : undefined}
+                  className="block bg-red-900/40 hover:bg-red-900/60 border border-red-700 rounded-2xl p-6 text-2xl text-zinc-100 transition-colors"
+                >
+                  📞 Call {profile.emergency_name || "your contact"}
+                  {profile.emergency_phone && (
+                    <span className="block text-zinc-300 text-xl mt-1">{profile.emergency_phone}</span>
+                  )}
+                </a>
+              </div>
+            )}
+
             {aboutPeople.length > 0 && (
               <div className="space-y-3">
                 <h4 className="text-2xl font-semibold text-amber-300">Your family</h4>
@@ -503,10 +560,15 @@ export default function PatientPage() {
                   <button
                     key={p.id}
                     onClick={() => speakText(`This is ${p.name}, your ${p.relationship}.`)}
-                    className="w-full text-left bg-zinc-900 hover:bg-zinc-800 border border-zinc-700 rounded-2xl p-6 text-2xl text-zinc-100 transition-colors"
+                    className="w-full text-left flex items-center gap-4 bg-zinc-900 hover:bg-zinc-800 border border-zinc-700 rounded-2xl p-5 transition-colors"
                   >
-                    {p.name} <span className="text-zinc-400">— your {p.relationship}</span>
-                    <span className="block text-zinc-500 text-base mt-2">🔊 Tap to hear this</span>
+                    <FamilyAvatar id={p.id} name={p.name} />
+                    <span>
+                      <span className="text-2xl text-zinc-100">
+                        {p.name} <span className="text-zinc-400">— your {p.relationship}</span>
+                      </span>
+                      <span className="block text-zinc-500 text-base mt-1">🔊 Tap to hear this</span>
+                    </span>
                   </button>
                 ))}
               </div>

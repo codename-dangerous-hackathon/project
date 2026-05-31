@@ -13,7 +13,15 @@ type Point = { lat: number; lng: number; fields: Record<string, string> };
 const LAYERS = [
   { key: "washrooms", label: "Public Washrooms", color: "#2563eb" },
   { key: "ltc", label: "Long-Term Care Homes", color: "#dc2626" },
+  { key: "reccentres", label: "Community & Rec Centres", color: "#16a34a" },
 ] as const;
+
+// Map a map layer to the backend places-tool category for "nearest to me".
+const BACKEND_CAT: Record<string, string> = {
+  washrooms: "washroom",
+  ltc: "carehome",
+  reccentres: "community",
+};
 
 type LayerKey = (typeof LAYERS)[number]["key"];
 
@@ -32,6 +40,11 @@ const POPUP_FIELDS: Record<LayerKey, [string, string][]> = {
     ["phone", "Phone"],
     ["respite", "Respite"],
     ["adult_day_program", "Adult day program"],
+  ],
+  reccentres: [
+    ["address", "Address"],
+    ["amenities", "Amenities"],
+    ["phone", "Phone"],
   ],
 };
 
@@ -64,10 +77,77 @@ export default function MapPage() {
   const [enabled, setEnabled] = useState<Record<LayerKey, boolean>>({
     washrooms: true,
     ltc: true,
+    reccentres: true,
   });
   const [counts, setCounts] = useState<Partial<Record<LayerKey, number>>>({});
   const [status, setStatus] = useState<"loading" | "ready" | "error">("loading");
   const [errMsg, setErrMsg] = useState("");
+
+  // "Nearest to me" state
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const LRef = useRef<any>(null);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const nearestGroupRef = useRef<any>(null);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const nearestMarkersRef = useRef<Record<string, any>>({});
+  const [finding, setFinding] = useState(false);
+  const [nearest, setNearest] = useState<
+    { key: string; name: string; address: string; lat: number; lng: number; distance_m: number }[]
+  >([]);
+
+  const handleFindNearest = () => {
+    const L = LRef.current;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const map = mapRef.current as any;
+    if (!L || !map) return;
+    if (typeof navigator === "undefined" || !navigator.geolocation) {
+      setErrMsg("Location isn't available on this device.");
+      return;
+    }
+    setFinding(true);
+    navigator.geolocation.getCurrentPosition(
+      async (pos) => {
+        const lat = pos.coords.latitude;
+        const lng = pos.coords.longitude;
+        if (nearestGroupRef.current) map.removeLayer(nearestGroupRef.current);
+        const group = L.layerGroup().addTo(map);
+        nearestGroupRef.current = group;
+        nearestMarkersRef.current = {};
+        L.circleMarker([lat, lng], {
+          radius: 9, color: "#fff", weight: 3, fillColor: "#7c3aed", fillOpacity: 1,
+        }).bindPopup("You are here").addTo(group);
+        map.setView([lat, lng], 14);
+
+        const results: typeof nearest = [];
+        for (const layer of LAYERS) {
+          if (!enabled[layer.key]) continue;
+          try {
+            const res = await fetch(
+              `/api/places/nearest?category=${BACKEND_CAT[layer.key]}&lat=${lat}&lng=${lng}&n=1`
+            );
+            const r = (await res.json()).results?.[0];
+            if (r) {
+              results.push({ key: layer.key, name: r.name, address: r.address, lat: r.lat, lng: r.lng, distance_m: r.distance_m });
+              const m = L.circleMarker([r.lat, r.lng], {
+                radius: 11, color: layer.color, weight: 4, fillColor: "#fff", fillOpacity: 0.95,
+              }).bindPopup(`<b>${r.name}</b><br>${r.distance_m} m away`).addTo(group);
+              nearestMarkersRef.current[layer.key] = m;
+            }
+          } catch {
+            /* skip */
+          }
+        }
+        results.sort((a, b) => a.distance_m - b.distance_m);
+        setNearest(results);
+        setFinding(false);
+      },
+      () => {
+        setErrMsg("Could not get your location (permission denied?).");
+        setFinding(false);
+      },
+      { timeout: 10000, maximumAge: 60000 }
+    );
+  };
 
   // Initialize the map + load both datasets once.
   useEffect(() => {
@@ -76,6 +156,7 @@ export default function MapPage() {
       const mod = (await import("leaflet")) as unknown as { default?: unknown };
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const L: any = (mod.default ?? mod) as any;
+      LRef.current = L;
       if (cancelled || !mapEl.current || mapRef.current) return;
 
       const map = L.map(mapEl.current).setView([43.7, -79.38], 11); // Toronto
@@ -155,7 +236,14 @@ export default function MapPage() {
           ← Belong
         </Link>
         <h1 className="font-semibold dark:text-zinc-50">Nearby Places</h1>
-        <div className="ml-auto flex items-center gap-4">
+        <button
+          onClick={handleFindNearest}
+          disabled={finding}
+          className="text-sm bg-violet-600 text-white rounded-full px-4 py-1.5 font-medium hover:bg-violet-500 disabled:opacity-60"
+        >
+          {finding ? "Locating…" : "📍 Nearest to me"}
+        </button>
+        <div className="ml-auto flex items-center gap-4 flex-wrap">
           {LAYERS.map((layer) => (
             <label key={layer.key} className="flex items-center gap-2 cursor-pointer select-none text-sm dark:text-zinc-200">
               <input
@@ -185,6 +273,32 @@ export default function MapPage() {
         {status === "error" && (
           <div className="absolute top-3 left-1/2 -translate-x-1/2 z-[1000] rounded-md bg-red-50 text-red-700 border border-red-200 shadow px-4 py-2 text-sm max-w-md text-center">
             {errMsg}
+          </div>
+        )}
+        {nearest.length > 0 && (
+          <div className="absolute bottom-4 left-1/2 -translate-x-1/2 z-[1000] w-[90%] max-w-md rounded-xl bg-white dark:bg-zinc-800 shadow-lg p-3 text-sm">
+            <div className="flex items-center justify-between mb-1">
+              <span className="font-semibold dark:text-zinc-100">Nearest to you</span>
+              <button onClick={() => setNearest([])} className="text-gray-400 hover:text-gray-600 dark:hover:text-zinc-200">✕</button>
+            </div>
+            {nearest.map((n) => (
+              <button
+                key={n.key}
+                onClick={() => {
+                  const m = nearestMarkersRef.current[n.key];
+                  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                  const map = mapRef.current as any;
+                  if (m && map) { map.setView([n.lat, n.lng], 15); m.openPopup(); }
+                }}
+                className="flex items-center w-full text-left py-1.5 px-2 rounded hover:bg-zinc-100 dark:hover:bg-zinc-700 dark:text-zinc-200"
+              >
+                <span className="inline-block w-2.5 h-2.5 rounded-full mr-2 shrink-0" style={{ background: LAYERS.find((l) => l.key === n.key)?.color }} />
+                <span className="truncate">{n.name}</span>
+                <span className="text-gray-400 ml-auto pl-2 shrink-0">
+                  {n.distance_m < 1000 ? `${n.distance_m} m` : `${(n.distance_m / 1000).toFixed(1)} km`}
+                </span>
+              </button>
+            ))}
           </div>
         )}
       </div>

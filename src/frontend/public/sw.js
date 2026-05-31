@@ -1,7 +1,7 @@
 // Belong service worker.
 // Goal: stay installable/offline-capable WITHOUT ever pinning stale app code.
 // Bump CACHE_NAME on any change here to force a clean re-cache.
-const CACHE_NAME = 'belong-v2';
+const CACHE_NAME = 'belong-v3';
 
 // --- Web Push: medication / appointment / family reminders ---
 self.addEventListener('push', (event) => {
