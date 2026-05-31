@@ -82,6 +82,7 @@ export default function MapPage() {
   const [counts, setCounts] = useState<Partial<Record<LayerKey, number>>>({});
   const [status, setStatus] = useState<"loading" | "ready" | "error">("loading");
   const [errMsg, setErrMsg] = useState("");
+  const [filtersOpen, setFiltersOpen] = useState(false);
 
   // "Nearest to me" state
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -231,36 +232,64 @@ export default function MapPage() {
 
   return (
     <div className="flex flex-col h-screen">
-      <header className="flex items-center gap-4 px-4 py-3 border-b border-black/10 dark:border-white/15 bg-white dark:bg-black z-[1000]">
-        <Link href="/" className="text-sm text-gray-600 dark:text-gray-300 hover:underline">
-          ← Belong
-        </Link>
-        <h1 className="font-semibold dark:text-zinc-50">Nearby Places</h1>
-        <button
-          onClick={handleFindNearest}
-          disabled={finding}
-          className="text-sm bg-violet-600 text-white rounded-full px-4 py-1.5 font-medium hover:bg-violet-500 disabled:opacity-60"
-        >
-          {finding ? "Locating…" : "📍 Nearest to me"}
-        </button>
-        <div className="ml-auto flex items-center gap-4 flex-wrap">
-          {LAYERS.map((layer) => (
-            <label key={layer.key} className="flex items-center gap-2 cursor-pointer select-none text-sm dark:text-zinc-200">
-              <input
-                type="checkbox"
-                checked={enabled[layer.key]}
-                onChange={(e) => setEnabled((s) => ({ ...s, [layer.key]: e.target.checked }))}
-                className="accent-current"
-                style={{ accentColor: layer.color }}
-              />
-              <span className="inline-block w-3 h-3 rounded-full" style={{ background: layer.color }} />
-              {layer.label}
-              {counts[layer.key] != null && (
-                <span className="text-gray-400">({counts[layer.key]})</span>
-              )}
-            </label>
-          ))}
+      <header className="border-b border-black/10 dark:border-white/15 bg-white dark:bg-black z-[1000]">
+        <div className="flex items-center gap-3 px-4 py-3 flex-wrap">
+          <Link href="/" className="text-sm text-gray-600 dark:text-gray-300 hover:underline shrink-0">
+            ← Belong
+          </Link>
+          <h1 className="font-semibold dark:text-zinc-50 shrink-0">Nearby Places</h1>
+          <button
+            onClick={handleFindNearest}
+            disabled={finding}
+            className="text-sm bg-violet-600 text-white rounded-full px-4 py-1.5 font-medium hover:bg-violet-500 disabled:opacity-60 shrink-0"
+          >
+            {finding ? "Locating…" : "📍 Nearest to me"}
+          </button>
+          <button
+            onClick={() => setFiltersOpen((v) => !v)}
+            className="ml-auto sm:hidden text-sm bg-zinc-100 dark:bg-zinc-800 dark:text-zinc-200 rounded-full px-3 py-1.5 font-medium"
+          >
+            {filtersOpen ? "Hide filters ▲" : "Filters ▼"}
+          </button>
+          <div className="hidden sm:flex ml-auto items-center gap-4 flex-wrap">
+            {LAYERS.map((layer) => (
+              <label key={layer.key} className="flex items-center gap-2 cursor-pointer select-none text-sm dark:text-zinc-200">
+                <input
+                  type="checkbox"
+                  checked={enabled[layer.key]}
+                  onChange={(e) => setEnabled((s) => ({ ...s, [layer.key]: e.target.checked }))}
+                  className="accent-current"
+                  style={{ accentColor: layer.color }}
+                />
+                <span className="inline-block w-3 h-3 rounded-full" style={{ background: layer.color }} />
+                {layer.label}
+                {counts[layer.key] != null && (
+                  <span className="text-gray-400">({counts[layer.key]})</span>
+                )}
+              </label>
+            ))}
+          </div>
         </div>
+        {filtersOpen && (
+          <div className="sm:hidden flex flex-col gap-2 px-4 pb-3 border-t border-black/5 dark:border-white/10 pt-2">
+            {LAYERS.map((layer) => (
+              <label key={layer.key} className="flex items-center gap-2 cursor-pointer select-none text-sm dark:text-zinc-200">
+                <input
+                  type="checkbox"
+                  checked={enabled[layer.key]}
+                  onChange={(e) => setEnabled((s) => ({ ...s, [layer.key]: e.target.checked }))}
+                  className="accent-current"
+                  style={{ accentColor: layer.color }}
+                />
+                <span className="inline-block w-3 h-3 rounded-full" style={{ background: layer.color }} />
+                {layer.label}
+                {counts[layer.key] != null && (
+                  <span className="text-gray-400">({counts[layer.key]})</span>
+                )}
+              </label>
+            ))}
+          </div>
+        )}
       </header>
 
       <div className="relative flex-1">

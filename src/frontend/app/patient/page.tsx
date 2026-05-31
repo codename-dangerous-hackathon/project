@@ -380,7 +380,15 @@ export default function PatientPage() {
   };
 
   return (
-    <main className="flex flex-col items-center justify-center w-full min-h-[100dvh] bg-[linear-gradient(to_bottom,#15605e_0%,#000000_60%)] text-white p-4 font-sans select-none relative">
+    <main className="flex flex-col items-center w-full min-h-[100dvh] bg-[linear-gradient(to_bottom,#15605e_0%,#000000_60%)] text-white p-4 font-sans select-none relative overflow-y-auto justify-center">
+      <style>{`
+        @media (max-height: 700px) {
+          .talk-btn-idle { height: 12rem !important; width: 12rem !important; }
+          .talk-btn-listening { height: 14rem !important; width: 14rem !important; }
+          .talk-btn-other { height: 12rem !important; width: 12rem !important; }
+          .secondary-actions { margin-top: 2rem !important; }
+        }
+      `}</style>
       
       {/* Subtle Home Button in Top Left */}
       <Link href="/" className="absolute top-6 left-6 p-3 text-zinc-600 hover:text-zinc-300 transition-colors bg-zinc-900/50 hover:bg-zinc-800 rounded-full" title="Back to Home">
@@ -390,10 +398,11 @@ export default function PatientPage() {
       {/* Enable reminders (top right) */}
       <button
         onClick={enableReminders}
-        className="absolute top-6 right-6 px-4 py-3 text-sm text-zinc-400 hover:text-zinc-100 bg-zinc-900/50 hover:bg-zinc-800 rounded-full transition-colors"
+        className="absolute top-6 right-6 px-3 py-3 text-sm text-zinc-400 hover:text-zinc-100 bg-zinc-900/50 hover:bg-zinc-800 rounded-full transition-colors"
         title="Enable medication & event reminders"
       >
-        {remindersOn ? "🔔 Reminders on" : "🔕 Turn on reminders"}
+        <span className="hidden sm:inline">{remindersOn ? "🔔 Reminders on" : "🔕 Turn on reminders"}</span>
+        <span className="sm:hidden">{remindersOn ? "🔔" : "🔕"}</span>
       </button>
 
       {/* Full-screen reminder card (medication / appointment / family / waste_pickup) */}
@@ -454,10 +463,10 @@ export default function PatientPage() {
           onClick={handleTalk}
           disabled={status === "thinking"}
           className={`relative rounded-full transition-all duration-300 flex items-center justify-center shadow-2xl
-            ${status === "idle" ? "bg-amber-600 hover:bg-amber-500 hover:scale-105 active:scale-95 h-64 w-64 md:h-80 md:w-80" : ""}
-            ${status === "listening" ? "bg-red-600 animate-pulse h-72 w-72 md:h-96 md:w-96" : ""}
-            ${status === "thinking" ? "bg-zinc-600 animate-pulse h-64 w-64 md:h-80 md:w-80" : ""}
-            ${status === "speaking" ? "bg-emerald-600 animate-pulse h-64 w-64 md:h-80 md:w-80 shadow-[0_0_80px_rgba(5,150,105,0.6)]" : ""}
+            ${status === "idle" ? "talk-btn-idle bg-amber-600 hover:bg-amber-500 hover:scale-105 active:scale-95 h-64 w-64 md:h-80 md:w-80" : ""}
+            ${status === "listening" ? "talk-btn-listening bg-red-600 animate-pulse h-72 w-72 md:h-96 md:w-96" : ""}
+            ${status === "thinking" ? "talk-btn-other bg-zinc-600 animate-pulse h-64 w-64 md:h-80 md:w-80" : ""}
+            ${status === "speaking" ? "talk-btn-other bg-emerald-600 animate-pulse h-64 w-64 md:h-80 md:w-80 shadow-[0_0_80px_rgba(5,150,105,0.6)]" : ""}
           `}
         >
           <span className="text-3xl md:text-4xl font-bold tracking-wide px-4 text-center leading-tight">
@@ -470,7 +479,7 @@ export default function PatientPage() {
       )}
 
       {/* Secondary Actions Row */}
-      <div className="flex flex-wrap gap-4 mt-16 w-full max-w-3xl justify-center">
+      <div className="secondary-actions flex flex-wrap gap-4 mt-16 w-full max-w-3xl justify-center">
         <button
           onClick={openAbout}
           className="flex-1 min-w-[150px] bg-zinc-800 hover:bg-zinc-700 rounded-3xl py-8 text-2xl md:text-3xl font-medium transition-transform active:scale-95 border border-zinc-700"

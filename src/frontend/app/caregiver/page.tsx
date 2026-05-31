@@ -121,7 +121,7 @@ function CalendarMonth({
             <div
               key={i}
               onClick={() => onDayClick(ds)}
-              className={`cursor-pointer min-h-[70px] sm:min-h-[88px] rounded-lg border p-1.5 hover:border-zinc-400 transition-colors ${isToday ? "border-zinc-900 bg-zinc-50" : "border-zinc-200"}`}
+              className={`cursor-pointer min-h-[56px] sm:min-h-[88px] rounded-lg border p-1 sm:p-1.5 hover:border-zinc-400 transition-colors ${isToday ? "border-zinc-900 bg-zinc-50" : "border-zinc-200"}`}
             >
               <div className={`text-xs mb-1 ${isToday ? "font-bold text-zinc-900" : "text-zinc-500"}`}>{day}</div>
               <div className="space-y-0.5">
@@ -131,7 +131,7 @@ function CalendarMonth({
                     <span
                       key={ev.id}
                       onClick={(e) => { e.stopPropagation(); onEventClick(ev); }}
-                      className={`block truncate rounded px-1 py-0.5 text-[10px] leading-tight ${st.cls}`}
+                      className={`block truncate rounded px-0.5 sm:px-1 py-0.5 text-[9px] sm:text-[10px] leading-tight ${st.cls}`}
                       title={`${ev.title} at ${ev.time}${ev.recurrence === "daily" ? " (every day)" : ""} — click to remove`}
                     >
                       {st.icon} {ev.time} {ev.title}
@@ -514,7 +514,7 @@ export default function CaregiverPage() {
               <p className="text-zinc-400 text-sm mt-1">100% On-Device Family Portal</p>
             </div>
           </div>
-          <span className="bg-emerald-500/20 text-emerald-400 border border-emerald-500/50 px-3 py-1 rounded-full text-xs font-medium flex items-center gap-2">
+          <span className="hidden sm:flex bg-emerald-500/20 text-emerald-400 border border-emerald-500/50 px-3 py-1 rounded-full text-xs font-medium items-center gap-2">
             <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
             Secure Offline Mode
           </span>
@@ -831,7 +831,7 @@ export default function CaregiverPage() {
           {/* CALENDAR / EVENTS */}
           {activeTab === "calendar" && (
             <div className="space-y-6">
-              <div className="flex items-center justify-between border-b pb-4">
+              <div className="flex items-center justify-between border-b pb-4 gap-3 flex-wrap">
                 <h2 className="text-3xl font-semibold tracking-tight">Calendar &amp; Reminders</h2>
                 <button onClick={sendTestReminder} className="text-sm bg-zinc-200 hover:bg-zinc-300 rounded-lg px-3 py-2 font-medium">
                   🔔 Send test reminder

@@ -202,6 +202,7 @@ export default function HermesPage() {
         #hermes-chat .hc-header {
           padding: 12px 16px; border-bottom: 1px solid var(--border);
           display: flex; align-items: center; gap: 10px; font-weight: 600;
+          flex-wrap: wrap;
         }
         #hermes-chat .hc-back {
           display: inline-flex; align-items: center; gap: 6px;
@@ -211,10 +212,14 @@ export default function HermesPage() {
         }
         #hermes-chat .hc-back:hover { background: #e6f6f5; }
         #hermes-chat .hc-back:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-        #hermes-chat .hc-title { font-size: 18px; }
-        #hermes-chat .hc-dot { width: 9px; height: 9px; border-radius: 50%; background: var(--muted); }
+        #hermes-chat .hc-title { font-size: 18px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; flex: 1; }
+        #hermes-chat .hc-dot { width: 9px; height: 9px; border-radius: 50%; background: var(--muted); flex-shrink: 0; }
         #hermes-chat .hc-dot.ok { background: var(--accent); box-shadow: 0 0 8px var(--accent); }
-        #hermes-chat .hc-header small { color: var(--muted); font-weight: 400; margin-left: auto; }
+        #hermes-chat .hc-header small { color: var(--muted); font-weight: 400; margin-left: auto; flex-shrink: 0; }
+        @media (max-width: 480px) {
+          #hermes-chat .hc-header small { display: none; }
+          #hermes-chat .hc-title { font-size: 16px; }
+        }
         #hermes-chat .hc-log {
           flex: 1; overflow-y: auto; padding: 16px; display: flex; flex-direction: column; gap: 12px;
         }
