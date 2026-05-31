@@ -12,6 +12,12 @@
 
 # testing
 /coverage
+/test-results/
+# Playwright artifacts — screenshots/report capture REAL patient data (faces,
+# names) rendered in the app; never commit them to this public repo.
+/e2e/screenshots/
+/e2e/report/
+/e2e/.last-run.json
 
 # next.js
 /.next/

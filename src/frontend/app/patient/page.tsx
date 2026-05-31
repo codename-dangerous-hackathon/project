@@ -108,6 +108,23 @@ export default function PatientPage() {
     }
   };
 
+  // --- Daily Briefing (a warm "good morning" summary of today) ---
+  const [briefingOpen, setBriefingOpen] = useState(false);
+  const [briefing, setBriefing] = useState("");
+
+  const openBriefing = async () => {
+    let text = "Good morning.";
+    try {
+      const res = await fetch("/api/briefing", { cache: "no-store" });
+      text = (await res.json()).briefing || text;
+    } catch {
+      /* keep the gentle default */
+    }
+    setBriefing(text);
+    setBriefingOpen(true);
+    speakText(text); // read it aloud, like About Me
+  };
+
   // --- About Me (who you are: name, photo, your story, your family) ---
   type Person = { id: string; name: string; relationship: string };
   const [aboutOpen, setAboutOpen] = useState(false);
@@ -498,7 +515,39 @@ export default function PatientPage() {
         >
           📖 Memories
         </button>
+        <button
+          onClick={openBriefing}
+          className="flex-1 min-w-[150px] bg-zinc-800 hover:bg-zinc-700 rounded-3xl py-8 text-2xl md:text-3xl font-medium transition-transform active:scale-95 border border-zinc-700"
+        >
+          🌅 Good Morning
+        </button>
       </div>
+
+      {/* Daily Briefing overlay — a warm summary of today */}
+      {briefingOpen && (
+        <div className="absolute inset-0 z-20 bg-black/95 flex flex-col p-6 overflow-y-auto">
+          <div className="flex items-center justify-between mb-8 max-w-2xl mx-auto w-full">
+            <h2 className="text-3xl md:text-4xl font-medium text-zinc-200">Your Daily Briefing</h2>
+            <button
+              onClick={() => setBriefingOpen(false)}
+              className="text-zinc-200 bg-zinc-800 hover:bg-zinc-700 rounded-full px-6 py-3 text-xl"
+            >
+              Close
+            </button>
+          </div>
+          <div className="max-w-2xl mx-auto w-full space-y-8 pb-10">
+            <p className="text-2xl md:text-3xl text-zinc-100 leading-relaxed whitespace-pre-line">
+              {briefing}
+            </p>
+            <button
+              onClick={() => speakText(briefing)}
+              className="w-full bg-emerald-700 hover:bg-emerald-600 rounded-2xl py-6 text-2xl font-medium text-white transition-colors"
+            >
+              🔊 Read it again
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* About Me overlay — who you are */}
       {aboutOpen && (

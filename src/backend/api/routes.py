@@ -391,13 +391,16 @@ async def synthesize(request: AskRequest):
 
 @router.get("/briefing")
 async def get_daily_briefing():
-    """
-    Gentle morning audio/text summary logic.
-    Could query ChromaDB for today's 'routine' context.
-    """
-    routine_results = vdb.query_memories("morning routine schedule", n_results=1)
-    routine_hint = "No specific schedule."
-    if routine_results['documents'] and len(routine_results['documents'][0]) > 0:
-        routine_hint = routine_results['documents'][0][0]
-        
-    return {"briefing": f"Good morning. Here is what we have: {routine_hint}."}
+    """A warm, concrete morning briefing composed on-device from the patient
+    profile + today's schedule. Deterministic (no LLM) so it's instant and never
+    invents anything."""
+    from datetime import datetime
+
+    now = datetime.now()
+    prof = store.get_profile()
+    first = (prof.get("name") or "").split()[0] if prof.get("name") else ""
+    greeting = f"Good morning, {first}." if first else "Good morning."
+    parts = [greeting, f"Today is {now.strftime('%A, %B %d')}."]
+    schedule = reminders.calendar_summary(now)
+    parts.append("Here is your day:\n" + schedule if schedule else "You have a calm, open day ahead.")
+    return {"briefing": "\n\n".join(parts)}

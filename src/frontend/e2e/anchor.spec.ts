@@ -672,6 +672,18 @@ test.describe("Stored data views (verify what's saved)", () => {
       page.getByRole("heading", { name: "💊 Time for your Heart Pill" })
     ).not.toBeVisible();
   });
+
+  test("Patient Daily Briefing overlay shows a warm morning briefing", async ({ page }) => {
+    await page.goto("/patient");
+    await page.getByRole("button", { name: /Good Morning/i }).click();
+    await expect(page.getByRole("heading", { name: /Daily Briefing/i })).toBeVisible();
+    // The briefing body always states today's date ("Today is …") — unique to the
+    // overlay (avoids colliding with the "🌅 Good Morning" button text).
+    await expect(page.getByText(/Today is/i)).toBeVisible();
+    await page.screenshot({ path: `${SHOTS}/14-patient-briefing.png`, fullPage: true });
+    await page.getByRole("button", { name: "Close" }).click();
+    await expect(page.getByRole("heading", { name: /Daily Briefing/i })).not.toBeVisible();
+  });
 });
 
 test.describe("Map — nearby places", () => {
@@ -699,10 +711,8 @@ test.describe("Map — nearby places", () => {
 // failing the suite. These are the real coverage gaps vs. the docs.
 // ---------------------------------------------------------------------------
 test.describe("Spec gaps (P0 features missing in UI)", () => {
-  test.fixme(
-    "Daily Briefing has a Patient-facing UI (backend /briefing exists, no UI calls it)",
-    async () => {}
-  );
+  // Daily Briefing is now implemented — see the "Patient Daily Briefing overlay"
+  // test in the "Stored data views" group above.
   // NOTE: the Patient "Memories" button now works (lists life-story memories,
   // tap to hear). What's still missing is the richer photo + voice-caption
   // journal from the spec.
