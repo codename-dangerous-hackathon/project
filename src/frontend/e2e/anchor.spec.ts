@@ -128,7 +128,7 @@ test.describe("Caregiver — portal", () => {
   test("tabs switch between Dashboard, Family and Notes", async ({ page }) => {
     await page.goto("/caregiver");
 
-    await expect(page.getByRole("heading", { name: "Today's Summary" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Daily Dashboard" })).toBeVisible();
     await page.screenshot({ path: `${SHOTS}/05-caregiver-dashboard.png`, fullPage: true });
 
     await page.getByRole("button", { name: "Family Members" }).click();

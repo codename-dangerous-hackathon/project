@@ -441,7 +441,7 @@ export default function PatientPage() {
   };
 
   return (
-    <main className="flex flex-col items-center w-full min-h-[100dvh] bg-[linear-gradient(to_bottom,#15605e_0%,#000000_60%)] text-white p-4 font-sans select-none relative overflow-y-auto justify-center">
+    <main className="flex flex-col items-center w-full min-h-[100dvh] bg-[linear-gradient(to_bottom,#15605e_0%,#000000_60%)] text-white px-4 pt-20 pb-6 font-sans select-none relative overflow-y-auto justify-center gap-3">
       <style>{`
         @media (max-height: 700px) {
           .talk-btn-idle { height: 12rem !important; width: 12rem !important; }
@@ -495,7 +495,7 @@ export default function PatientPage() {
       )}
 
       {/* Dynamic Header */}
-      <h1 className="text-4xl md:text-5xl font-medium text-center text-zinc-300 mb-2 max-w-2xl px-4 min-h-[5rem]">
+      <h1 className="text-3xl md:text-5xl font-medium text-center text-zinc-300 max-w-2xl px-2 min-h-[3.5rem]">
         {subtitle}
       </h1>
 
@@ -540,40 +540,40 @@ export default function PatientPage() {
       )}
 
       {/* Secondary Actions Row */}
-      <div className="secondary-actions flex flex-wrap gap-4 mt-16 w-full max-w-3xl justify-center">
+      <div className="secondary-actions grid grid-cols-3 gap-2 sm:gap-3 mt-4 w-full max-w-md sm:max-w-2xl">
         <button
           onClick={openAbout}
-          className="flex-1 min-w-[150px] bg-zinc-800 hover:bg-zinc-700 rounded-3xl py-8 text-2xl md:text-3xl font-medium transition-transform active:scale-95 border border-zinc-700"
+          className="bg-zinc-800 hover:bg-zinc-700 rounded-2xl py-4 px-1 text-base sm:text-xl font-medium leading-tight text-center transition-transform active:scale-95 border border-zinc-700 min-h-[5rem] flex items-center justify-center"
         >
           👤 About Me
         </button>
         <button
           onClick={handleIdentify}
-          className="flex-1 min-w-[150px] bg-zinc-800 hover:bg-zinc-700 rounded-3xl py-8 text-2xl md:text-3xl font-medium transition-transform active:scale-95 border border-zinc-700"
+          className="bg-zinc-800 hover:bg-zinc-700 rounded-2xl py-4 px-1 text-base sm:text-xl font-medium leading-tight text-center transition-transform active:scale-95 border border-zinc-700 min-h-[5rem] flex items-center justify-center"
         >
           {status === "camera" ? "👁️ Identify Face" : "📷 Who is this?"}
         </button>
         <button
           onClick={openMemories}
-          className="flex-1 min-w-[150px] bg-zinc-800 hover:bg-zinc-700 rounded-3xl py-8 text-2xl md:text-3xl font-medium transition-transform active:scale-95 border border-zinc-700"
+          className="bg-zinc-800 hover:bg-zinc-700 rounded-2xl py-4 px-1 text-base sm:text-xl font-medium leading-tight text-center transition-transform active:scale-95 border border-zinc-700 min-h-[5rem] flex items-center justify-center"
         >
           📖 Memories
         </button>
         <button
           onClick={openBriefing}
-          className="flex-1 min-w-[150px] bg-zinc-800 hover:bg-zinc-700 rounded-3xl py-8 text-2xl md:text-3xl font-medium transition-transform active:scale-95 border border-zinc-700"
+          className="bg-zinc-800 hover:bg-zinc-700 rounded-2xl py-4 px-1 text-base sm:text-xl font-medium leading-tight text-center transition-transform active:scale-95 border border-zinc-700 min-h-[5rem] flex items-center justify-center"
         >
           🌅 Good Morning
         </button>
         <button
           onClick={openMood}
-          className="flex-1 min-w-[150px] bg-zinc-800 hover:bg-zinc-700 rounded-3xl py-8 text-2xl md:text-3xl font-medium transition-transform active:scale-95 border border-zinc-700"
+          className="bg-zinc-800 hover:bg-zinc-700 rounded-2xl py-4 px-1 text-base sm:text-xl font-medium leading-tight text-center transition-transform active:scale-95 border border-zinc-700 min-h-[5rem] flex items-center justify-center"
         >
           🙂 How I Feel
         </button>
         <button
           onClick={openPhotoJournal}
-          className="flex-1 min-w-[150px] bg-zinc-800 hover:bg-zinc-700 rounded-3xl py-8 text-2xl md:text-3xl font-medium transition-transform active:scale-95 border border-zinc-700"
+          className="bg-zinc-800 hover:bg-zinc-700 rounded-2xl py-4 px-1 text-base sm:text-xl font-medium leading-tight text-center transition-transform active:scale-95 border border-zinc-700 min-h-[5rem] flex items-center justify-center"
         >
           📷 Photo Journal
         </button>

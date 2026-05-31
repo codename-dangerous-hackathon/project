@@ -600,7 +600,7 @@ export default function CaregiverPage() {
 
       <div className="max-w-5xl mx-auto mt-8 px-6 grid grid-cols-1 md:grid-cols-4 gap-8">
         {/* Sidebar */}
-        <aside className="md:col-span-1 flex flex-col gap-2">
+        <aside className="md:col-span-1 flex md:flex-col gap-2 overflow-x-auto md:overflow-visible pb-1">
           {([
             ["dashboard", "📊 Daily Dashboard"],
             ["family", "👪 Family Members"],
@@ -611,7 +611,7 @@ export default function CaregiverPage() {
             <button
               key={key}
               onClick={() => setActiveTab(key)}
-              className={`text-left px-4 py-3 rounded-lg font-medium transition-colors ${activeTab === key ? "bg-zinc-900 text-white shadow-md" : "hover:bg-zinc-200 text-zinc-600"}`}
+              className={`text-left shrink-0 whitespace-nowrap px-4 py-3 rounded-lg font-medium transition-colors ${activeTab === key ? "bg-zinc-900 text-white shadow-md" : "bg-zinc-100 md:bg-transparent hover:bg-zinc-200 text-zinc-600"}`}
             >
               {label}
             </button>
