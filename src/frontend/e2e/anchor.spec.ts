@@ -21,12 +21,12 @@ test.describe("Landing page", () => {
     await page.screenshot({ path: `${SHOTS}/01-home.png`, fullPage: true });
 
     // Patient link
-    await page.getByRole("link", { name: "Belong Voice Companion (Patient)" }).click();
+    await page.getByRole("link", { name: /Voice Companion/i }).click();
     await expect(page).toHaveURL(/\/patient$/);
 
     // Caregiver link
     await page.goto("/");
-    await page.getByRole("link", { name: "Caregiver Dashboard" }).click();
+    await page.getByRole("link", { name: /Caregiver Dashboard/i }).click();
     await expect(page).toHaveURL(/\/caregiver$/);
   });
 });
