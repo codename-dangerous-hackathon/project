@@ -8,6 +8,7 @@ The MVP works and the README is current. This roadmap takes it from "works in a 
 
 ## Progress log
 
+- **2026-05-30 (cont.)** — **Phase 2 Step 2 done**: `database/store.py` (typed SQLite accessors) + `database/backfill.py` (`reconcile()`, idempotent JSON+Chroma → SQLite, shared `migration` provenance) wired into `main.py` startup (runs every boot, graceful). Still additive — routes unchanged. Backend tests now 33 green; live boot reconciled real data (4 people / 5 memories / 1 event / profile) read-only on sources; eval unchanged. **Next: Step 3** (route cutover — SQLite becomes authoritative + Chroma dual-write on new writes).
 - **2026-05-30** — Phase 0 cleanup done: deleted dead modules (`tools/events.py`, `tools/toronto_db.py`, `database/sqlite_manager.py` [old], the duplicate `GET /events` handler) + 5 scaffold SVGs; moved the two "Anchor"-era spec docs to `docs/history/` with banners. `.claude/` toolkit + the secrets hook landed. Backend test suite stood up (now 24 tests, green). Fixed the `_occurs_on` daily start-date bug (+regression test). **Phase 2 Step 1 (DB foundation)** landed: `database/sqlite_manager.py` + `database/migrations.py` (user_version migrations, v1 schema) + isolation in conftest + migration tests. Nothing reads from SQLite yet (additive).
 
 ## Phase 0 — Hygiene & foundations (clear the decks)

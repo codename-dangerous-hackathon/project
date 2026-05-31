@@ -85,7 +85,7 @@ New `database/retrieval.py`: `retrieve(query, person_scope=None, k=5) -> list[Ra
 ## 4. Phased implementation order (each step re-runs the eval as its gate)
 
 1. **DB foundation** — `sqlite_manager.py` (lazy `get_connection`, `DB_PATH` constant for conftest), `migrations.py` (`user_version`). No read path changes; `pytest` still isolates.
-2. **Store facade + backfill** — `store.py` (typed accessors, dual-write SQLite+Chroma), `backfill.py` (idempotent JSON+Chroma → SQLite, `source='migration'`, marker-guarded), wired into `main.py` startup in try/except. Extend `/reset-demo` to seed SQLite too. **Capture eval baseline here.**
+2. **Store facade + backfill** — `store.py` (typed accessors), `backfill.reconcile()` (idempotent JSON+Chroma → SQLite, shared `source='migration'` provenance with a stable id), wired into `main.py` startup in try/except. **Refinement (implemented):** reconcile runs on *every* boot (not one-shot marker-guarded) during the transition, so SQLite can't drift from the still-authoritative old stores; it becomes a no-op/removed once Step 3 flips authority. Extend `/reset-demo` to seed SQLite too. **Capture eval baseline here.** ✅ Done 2026-05-30.
 3. **Route cutover (pure refactor)** — routes/`reminders`/`profile` call `store.*`; response shapes unchanged. Update `conftest.py` to monkeypatch `DB_PATH`→tmp. **Eval+pytest must match baseline exactly.**
 4. **Episodic/semantic typing + provenance** — `add_memory` takes `kind`+provenance; denormalize into Chroma metadata. Additive; baseline unchanged.
 5. **Hybrid retrieval + rerank** — `retrieval.py`; companion uses it. **The measured win:** expect `grounded` up, `trap` flat-or-up, others unaffected; tune weights against the harness; record recall@k.
