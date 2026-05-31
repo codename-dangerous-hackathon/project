@@ -232,3 +232,22 @@ def bump_memory_usage(ids: list[str], now: str) -> None:
             (now, *ids),
         )
         conn.commit()
+
+
+# ----- consolidation support (Step 7) ----------------------------------------
+
+def list_active_semantic() -> list[dict]:
+    """Live (non-superseded) semantic memories — the dedup candidates."""
+    with closing(sqlite_manager.get_connection()) as conn:
+        rows = conn.execute(
+            "SELECT id, person_id, use_count, created_at FROM memories "
+            "WHERE kind = 'semantic' AND superseded_by IS NULL"
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def mark_superseded(memory_id: str, survivor_id: str) -> None:
+    """Soft-delete a duplicate by pointing it at the surviving memory."""
+    with closing(sqlite_manager.get_connection()) as conn:
+        conn.execute("UPDATE memories SET superseded_by = ? WHERE id = ?", (survivor_id, memory_id))
+        conn.commit()

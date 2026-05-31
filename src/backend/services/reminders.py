@@ -263,6 +263,13 @@ def _run():
             tick()
         except Exception as ex:
             print("scheduler error:", ex)
+        try:  # once-a-day memory consolidation (lazy import: keeps Chroma off the reminders import path)
+            from services import consolidation
+            res = consolidation.maybe_run()
+            if res and res.get("superseded"):
+                print(f"Memory consolidation: {res}")
+        except Exception as ex:
+            print("consolidation error:", ex)
         time.sleep(20)
 
 
