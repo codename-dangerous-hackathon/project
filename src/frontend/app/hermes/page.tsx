@@ -186,7 +186,7 @@ export default function HermesPage() {
   }, []);
 
   return (
-    <main className="flex flex-col min-h-0 h-[100dvh]">
+    <main className="fixed inset-0 flex flex-col min-h-0 overflow-hidden">
       {/* All styles scoped under #hermes-chat so nothing leaks into the rest of the app. */}
       <style>{`
         #hermes-chat {
