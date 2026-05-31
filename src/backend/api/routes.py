@@ -81,6 +81,10 @@ class MoodRequest(BaseModel):
     mood: str  # one of MOODS
     note: Optional[str] = ""
 
+class PhotoMemoryRequest(BaseModel):
+    text: str  # the caption
+    image_base64: str
+
 @router.post("/ask")
 async def ask_endpoint(request: AskRequest):
     """
@@ -463,3 +467,32 @@ async def get_moods():
 async def delete_mood_entry(mood_id: str):
     store.delete_mood(mood_id)
     return {"status": "deleted", "id": mood_id}
+
+# ----- Photo memories (a picture + a caption, read aloud) -----
+
+@router.post("/memories/photo")
+async def create_photo_memory(request: PhotoMemoryRequest):
+    """A photo memory = a general memory (its text is the caption) + an on-device
+    thumbnail keyed by the memory id."""
+    if not request.text.strip():
+        raise HTTPException(status_code=400, detail="A caption is required.")
+    mem_id = writes.record_memory(request.text, person_id=None, scope="general", tags="photo")
+    if not photos.save_photo(mem_id, request.image_base64):
+        writes.delete_memory(mem_id)  # roll back the memory if the image won't decode
+        raise HTTPException(status_code=400, detail="Could not read that image.")
+    return {"status": "success", "memory_id": mem_id, "has_photo": True}
+
+@router.get("/memories/{memory_id}/photo")
+async def get_memory_photo(memory_id: str):
+    from fastapi.responses import FileResponse
+    path = photos.photo_path(memory_id)
+    if not path:
+        raise HTTPException(status_code=404, detail="No photo")
+    return FileResponse(path, media_type="image/jpeg")
+
+@router.get("/photo-journal")
+async def photo_journal():
+    """Memories that have a photo (the patient's Photo Journal)."""
+    items = [{"id": m["id"], "caption": m["text"]}
+             for m in store.list_memories() if photos.photo_path(m["id"])]
+    return {"photos": items}

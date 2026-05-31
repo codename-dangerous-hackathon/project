@@ -91,3 +91,8 @@ def delete_memory(memory_id: str) -> None:
     except Exception as e:
         print(f"[writes] Chroma delete_memory failed (continuing): {e}")
     store.delete_memory(memory_id)
+    try:  # drop the photo memory's image too (no-op if it has none)
+        from services import photos
+        photos.delete_photo(memory_id)
+    except Exception:
+        pass

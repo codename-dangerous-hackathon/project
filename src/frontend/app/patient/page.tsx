@@ -155,6 +155,20 @@ export default function PatientPage() {
     speakText("Thank you for sharing how you feel. I am right here with you.");
   };
 
+  // --- Photo Journal (pictures with captions, tap to hear) ---
+  const [photoJournalOpen, setPhotoJournalOpen] = useState(false);
+  const [photoJournal, setPhotoJournal] = useState<{ id: string; caption: string }[]>([]);
+
+  const openPhotoJournal = async () => {
+    try {
+      const res = await fetch("/api/photo-journal", { cache: "no-store" });
+      setPhotoJournal((await res.json()).photos || []);
+    } catch {
+      setPhotoJournal([]);
+    }
+    setPhotoJournalOpen(true);
+  };
+
   // --- About Me (who you are: name, photo, your story, your family) ---
   type Person = { id: string; name: string; relationship: string };
   const [aboutOpen, setAboutOpen] = useState(false);
@@ -557,7 +571,56 @@ export default function PatientPage() {
         >
           🙂 How I Feel
         </button>
+        <button
+          onClick={openPhotoJournal}
+          className="flex-1 min-w-[150px] bg-zinc-800 hover:bg-zinc-700 rounded-3xl py-8 text-2xl md:text-3xl font-medium transition-transform active:scale-95 border border-zinc-700"
+        >
+          📷 Photo Journal
+        </button>
       </div>
+
+      {/* Photo Journal overlay — pictures with captions, tap to hear */}
+      {photoJournalOpen && (
+        <div className="absolute inset-0 z-20 bg-black/95 flex flex-col p-6 overflow-y-auto">
+          <div className="flex items-center justify-between mb-8 max-w-3xl mx-auto w-full">
+            <h2 className="text-3xl md:text-4xl font-medium text-zinc-200">Photo Journal</h2>
+            <button
+              onClick={() => setPhotoJournalOpen(false)}
+              className="text-zinc-200 bg-zinc-800 hover:bg-zinc-700 rounded-full px-6 py-3 text-xl"
+            >
+              Close
+            </button>
+          </div>
+          <div className="max-w-3xl mx-auto w-full">
+            {photoJournal.length === 0 ? (
+              <p className="text-zinc-400 text-center text-xl mt-12">
+                No photo memories yet. Ask your family to add some.
+              </p>
+            ) : (
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-5 pb-10">
+                {photoJournal.map((p) => (
+                  <button
+                    key={p.id}
+                    onClick={() => speakText(p.caption)}
+                    className="text-left bg-zinc-900 hover:bg-zinc-800 border border-zinc-700 rounded-2xl overflow-hidden transition-colors"
+                  >
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img
+                      src={`/api/memories/${p.id}/photo`}
+                      alt={p.caption}
+                      className="w-full h-56 object-cover"
+                    />
+                    <div className="p-5 text-2xl text-zinc-100 leading-relaxed">
+                      {p.caption}
+                      <span className="block text-zinc-500 text-base mt-2">🔊 Tap to hear this</span>
+                    </div>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* Mood check-in overlay — tap how you feel */}
       {moodOpen && (

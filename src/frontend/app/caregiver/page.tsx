@@ -410,7 +410,10 @@ export default function CaregiverPage() {
       loadProfile();
     }
     if (activeTab === "family" || activeTab === "notes") load();
-    if (activeTab === "notes") loadProfile();
+    if (activeTab === "notes") {
+      loadProfile();
+      loadPhotoMems();
+    }
     if (activeTab === "calendar") {
       loadEvents();
       loadDiscover();
@@ -522,6 +525,56 @@ export default function CaregiverPage() {
     } catch {
       setNoteStatus("❌ Backend offline.");
     }
+  };
+
+  // --- Photo memories (a picture + a caption) ---
+  const [photoCaption, setPhotoCaption] = useState("");
+  const [photoB64, setPhotoB64] = useState("");
+  const [photoStatus, setPhotoStatus] = useState("");
+  const [photoMems, setPhotoMems] = useState<{ id: string; caption: string }[]>([]);
+
+  const loadPhotoMems = useCallback(async () => {
+    try {
+      const res = await fetch("/api/photo-journal", { cache: "no-store" });
+      setPhotoMems((await res.json()).photos || []);
+    } catch {
+      /* offline */
+    }
+  }, []);
+
+  const handleAddPhotoMemory = async () => {
+    if (!photoCaption.trim() || !photoB64) {
+      setPhotoStatus("⚠️ Add a caption and a photo.");
+      return;
+    }
+    setPhotoStatus("Saving…");
+    try {
+      const res = await fetch("/api/memories/photo", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text: photoCaption, image_base64: photoB64 }),
+      });
+      if (res.ok) {
+        setPhotoCaption("");
+        setPhotoB64("");
+        setPhotoStatus("✅ Added.");
+        setTimeout(() => setPhotoStatus(""), 2500);
+        await loadPhotoMems();
+      } else {
+        setPhotoStatus("❌ Could not save that photo.");
+      }
+    } catch {
+      setPhotoStatus("❌ Backend offline.");
+    }
+  };
+
+  const handleDeletePhotoMemory = async (id: string) => {
+    try {
+      await fetch(`/api/memories/${id}`, { method: "DELETE" });
+    } catch {
+      /* ignore */
+    }
+    loadPhotoMems();
   };
 
   return (
@@ -1134,6 +1187,49 @@ export default function CaregiverPage() {
                       </li>
                     ))}
                   </ul>
+                )}
+              </div>
+
+              {/* Photo Memories — a picture + a caption (shown in the patient's Photo Journal) */}
+              <div className="bg-white border rounded-2xl p-6 shadow-sm">
+                <h3 className="font-medium text-lg mb-4">Photo Memories</h3>
+                <div className="space-y-3 mb-5">
+                  <textarea
+                    value={photoCaption}
+                    onChange={(e) => setPhotoCaption(e.target.value)}
+                    className="w-full border rounded-lg px-4 py-3 bg-zinc-50 focus:ring-2 outline-none min-h-[60px]"
+                    placeholder="A caption — e.g., the trip to the lake with the grandkids in 1998."
+                  />
+                  <input
+                    type="file"
+                    accept="image/*"
+                    onChange={async (e) => { const f = e.target.files?.[0]; setPhotoB64(f ? await fileToBase64(f) : ""); }}
+                    className="block w-full text-sm file:mr-3 file:py-1.5 file:px-3 file:rounded-full file:border-0 file:text-xs file:font-semibold file:bg-zinc-200"
+                  />
+                  <div className="flex items-center gap-4">
+                    <button onClick={handleAddPhotoMemory} className="bg-zinc-900 text-white font-medium px-6 py-3 rounded-lg hover:bg-zinc-800 transition-colors">Add Photo Memory</button>
+                    {photoStatus && <span className="text-sm font-medium text-emerald-600">{photoStatus}</span>}
+                  </div>
+                </div>
+                {photoMems.length === 0 ? (
+                  <p className="text-zinc-400 text-sm">No photo memories yet.</p>
+                ) : (
+                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                    {photoMems.map((p) => (
+                      <div key={p.id} className="relative border rounded-xl overflow-hidden">
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img src={`/api/memories/${p.id}/photo`} alt={p.caption} className="w-full h-28 object-cover" />
+                        <div className="p-2 text-xs text-zinc-700 leading-snug">{p.caption}</div>
+                        <button
+                          onClick={() => handleDeletePhotoMemory(p.id)}
+                          className="absolute top-1 right-1 bg-white/90 rounded-full w-6 h-6 text-zinc-500 hover:text-red-600 text-sm"
+                          title="Remove"
+                        >
+                          ✕
+                        </button>
+                      </div>
+                    ))}
+                  </div>
                 )}
               </div>
             </div>

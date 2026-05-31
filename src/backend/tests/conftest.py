@@ -61,6 +61,13 @@ def _isolate_state(tmp_path, monkeypatch):
 
     monkeypatch.setattr(sqlite_manager, "DB_PATH", str(tmp_path / "belong.db"))
 
+    # Photo-memory / person-photo thumbnails -> tmp dir (never touch data/photos/).
+    import services.photos as photos
+
+    _photo_dir = tmp_path / "photos"
+    _photo_dir.mkdir(exist_ok=True)
+    monkeypatch.setattr(photos, "PHOTO_DIR", str(_photo_dir))
+
     # Drop any duplicate-suppression state carried between tests.
     monkeypatch.setattr(reminders, "_fired", set())
 
