@@ -1,10 +1,13 @@
 import os
+import time
 from datetime import datetime
 from database.chroma_manager import vdb
 from database import store
+from database import retrieval
 from services import reminders
 from services import profile
 from services import places
+from services import observability
 
 # Pseudo-code / NIM API compatibility setup setup
 # Assuming standard OpenAI formatting to hit a local NVIDIA NIM endpoint
@@ -80,7 +83,8 @@ def ask_companion(user_input: str, history=None, location=None) -> str:
     now = datetime.now()
     family = build_family_context()
     calendar = reminders.calendar_summary(now)
-    rag_context = fetch_revelant_memories(user_input)
+    hits = retrieval.retrieve(user_input, k=3)  # hybrid rerank (traced below)
+    rag_context = " ".join(h["text"] for h in hits)
     parts = [f"RIGHT NOW IT IS {now.strftime('%A, %B %d, %Y, at %I:%M %p')}."]
     prof = profile.get_profile()
     if prof.get("name"):
@@ -132,12 +136,15 @@ def ask_companion(user_input: str, history=None, location=None) -> str:
 
     messages.append({"role": "user", "content": user_input})
 
+    # 3. Call the Local NIM Model (timed + traced for observability)
+    model = get_companion_model()
+    t0 = time.perf_counter()
+    tokens, fallback = None, False
     try:
-        # 3. Call the Local NIM Model
         response = requests.post(
             f"{NIM_BASE_URL}/chat/completions",
             json={
-                "model": get_companion_model(),
+                "model": model,
                 "messages": messages,
                 "max_tokens": 200,
                 "temperature": 0.3,
@@ -149,11 +156,37 @@ def ask_companion(user_input: str, history=None, location=None) -> str:
             timeout=60,
         )
         response.raise_for_status()
-        content = (response.json()["choices"][0]["message"].get("content") or "").strip()
+        data = response.json()
+        tokens = data.get("usage")
+        content = (data["choices"][0]["message"].get("content") or "").strip()
         if not content:
             raise ValueError("empty content from model")
-        return content
+        reply = content
     except Exception as e:
         # Fallback mechanism if the model is unreachable during development
         print(f"NIM Error: {e}")
-        return "I hear you, my friend. Let's take a look at the garden together."
+        fallback = True
+        reply = "I hear you, my friend. Let's take a look at the garden together."
+
+    # 4. Record an on-device trace (full detail to the local JSONL; the HTTP view
+    # strips conversation text). Never let tracing break a turn.
+    try:
+        observability.record({
+            "ts": now.isoformat(),
+            "latency_ms": round((time.perf_counter() - t0) * 1000),
+            "model": model,
+            "fallback": fallback,
+            "retrieved": [{"id": h["id"], "score": h.get("score"), "text": h["text"]} for h in hits],
+            "context": {
+                "family": bool(family),
+                "calendar": bool(calendar),
+                "profile": bool(prof.get("name")),
+                "location": bool(location),
+            },
+            "tokens": tokens,
+            "user_input": user_input,
+            "reply": reply,
+        })
+    except Exception:
+        pass
+    return reply

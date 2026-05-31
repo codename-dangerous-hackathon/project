@@ -42,6 +42,11 @@ def warmup() -> None:
     _get_app()
 
 
+def warmed() -> bool:
+    """Whether the face model is loaded (for /health)."""
+    return _app is not None
+
+
 def _decode_image(image_bytes: bytes):
     # Decode via PIL so we honour the phone's EXIF rotation (a sideways face
     # won't be detected otherwise), then convert to the BGR array OpenCV expects.

@@ -404,3 +404,39 @@ async def get_daily_briefing():
     schedule = reminders.calendar_summary(now)
     parts.append("Here is your day:\n" + schedule if schedule else "You have a calm, open day ahead.")
     return {"briefing": "\n\n".join(parts)}
+
+# ----- Observability -----
+
+@router.get("/health")
+async def health():
+    """Liveness + readiness: model warmup, LLM reachability, store counts.
+    Non-PII — safe to expose over the public funnel."""
+    import requests as _rq
+    from agents.companion import NIM_BASE_URL
+    from tools import audio, vision
+
+    llm = {"reachable": False, "model": None}
+    try:
+        r = _rq.get(f"{NIM_BASE_URL}/models", timeout=2)
+        r.raise_for_status()
+        llm = {"reachable": True, "model": r.json()["data"][0]["id"]}
+    except Exception:
+        pass
+    try:
+        counts = {"people": len(store.list_people()), "memories": len(store.list_memories()),
+                  "events": len(store.list_events())}
+    except Exception:
+        counts = {}
+    return {
+        "status": "ok",
+        "models": {"whisper": audio.warmed(), "insightface": vision.warmed()},
+        "llm": llm,
+        "store": counts,
+    }
+
+@router.get("/traces")
+async def traces(n: int = 20):
+    """Recent companion-turn metrics (retrieved ids/scores, latency, tokens,
+    fallback) + a summary. NO conversation text — that stays in the local JSONL."""
+    from services import observability
+    return {"summary": observability.summary(), "traces": observability.recent_metrics(n)}
