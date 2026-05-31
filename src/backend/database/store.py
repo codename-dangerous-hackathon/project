@@ -16,6 +16,7 @@ Conventions:
 """
 import uuid
 from contextlib import closing
+from datetime import datetime
 
 from database import sqlite_manager
 
@@ -250,4 +251,35 @@ def mark_superseded(memory_id: str, survivor_id: str) -> None:
     """Soft-delete a duplicate by pointing it at the surviving memory."""
     with closing(sqlite_manager.get_connection()) as conn:
         conn.execute("UPDATE memories SET superseded_by = ? WHERE id = ?", (survivor_id, memory_id))
+        conn.commit()
+
+
+# ----- mood check-ins (Phase 4) ----------------------------------------------
+
+def add_mood(mood: str, note: str = "", actor: str = "patient") -> dict:
+    """Log a patient mood check-in (with provenance). Returns the new row."""
+    mid = str(uuid.uuid4())
+    now = datetime.now().isoformat()
+    prov = add_provenance(actor=actor, source="checkin", entered_at=now)
+    with closing(sqlite_manager.get_connection()) as conn:
+        conn.execute(
+            "INSERT INTO mood_logs (id, mood, note, created_at, provenance_id) VALUES (?, ?, ?, ?, ?)",
+            (mid, mood, note or "", now, prov),
+        )
+        conn.commit()
+    return {"id": mid, "mood": mood, "note": note or "", "created_at": now}
+
+
+def list_moods(limit: int = 30) -> list[dict]:
+    with closing(sqlite_manager.get_connection()) as conn:
+        rows = conn.execute(
+            "SELECT id, mood, note, created_at FROM mood_logs ORDER BY created_at DESC LIMIT ?",
+            (limit,),
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def delete_mood(mood_id: str) -> None:
+    with closing(sqlite_manager.get_connection()) as conn:
+        conn.execute("DELETE FROM mood_logs WHERE id = ?", (mood_id,))
         conn.commit()

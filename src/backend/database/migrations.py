@@ -98,9 +98,27 @@ def _v1(conn: sqlite3.Connection) -> None:
     )
 
 
+def _v2(conn: sqlite3.Connection) -> None:
+    """Patient mood check-ins (Phase 4). A new SQLite-native fact type that reuses
+    the provenance table — validates forward migration of the schema."""
+    conn.executescript(
+        """
+        CREATE TABLE mood_logs (
+            id            TEXT PRIMARY KEY,
+            mood          TEXT NOT NULL,        -- great|good|okay|low|sad
+            note          TEXT DEFAULT '',
+            created_at    TEXT NOT NULL,
+            provenance_id TEXT REFERENCES provenance(id)
+        );
+        CREATE INDEX idx_mood_created ON mood_logs(created_at);
+        """
+    )
+
+
 # Append-only list of (version, upgrade_fn). Never edit a shipped step.
 MIGRATIONS = [
     (1, _v1),
+    (2, _v2),
 ]
 
 

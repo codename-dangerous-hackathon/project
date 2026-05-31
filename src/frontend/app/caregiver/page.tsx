@@ -151,8 +151,12 @@ function CalendarMonth({
   );
 }
 
+const MOOD_EMOJI: Record<string, string> = {
+  great: "😊", good: "🙂", okay: "😐", low: "😟", sad: "😢",
+};
+
 export default function CaregiverPage() {
-  const [activeTab, setActiveTab] = useState<"dashboard" | "family" | "notes" | "calendar">("dashboard");
+  const [activeTab, setActiveTab] = useState<"dashboard" | "family" | "notes" | "calendar" | "mood">("dashboard");
 
   // Family members
   const [people, setPeople] = useState<Person[]>([]);
@@ -177,6 +181,25 @@ export default function CaregiverPage() {
       /* offline */
     }
   }, []);
+
+  // Mood check-ins (patient wellbeing history)
+  const [moods, setMoods] = useState<{ id: string; mood: string; note: string; created_at: string }[]>([]);
+  const loadMoods = useCallback(async () => {
+    try {
+      const res = await fetch("/api/mood", { cache: "no-store" });
+      setMoods((await res.json()).moods || []);
+    } catch {
+      /* offline */
+    }
+  }, []);
+  const deleteMood = async (id: string) => {
+    try {
+      await fetch(`/api/mood/${id}`, { method: "DELETE" });
+    } catch {
+      /* ignore */
+    }
+    loadMoods();
+  };
 
   const handleAddEvent = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -392,6 +415,7 @@ export default function CaregiverPage() {
       loadEvents();
       loadDiscover();
     }
+    if (activeTab === "mood") loadMoods();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeTab]);
 
@@ -528,6 +552,7 @@ export default function CaregiverPage() {
             ["dashboard", "📊 Daily Dashboard"],
             ["family", "👪 Family Members"],
             ["calendar", "🗓️ Calendar"],
+            ["mood", "💚 Wellbeing"],
             ["notes", "📖 Patient Notes"],
           ] as const).map(([key, label]) => (
             <button
@@ -1111,6 +1136,41 @@ export default function CaregiverPage() {
                   </ul>
                 )}
               </div>
+            </div>
+          )}
+
+          {/* WELLBEING — patient mood check-in history */}
+          {activeTab === "mood" && (
+            <div className="space-y-6">
+              <div className="flex items-center justify-between border-b pb-4">
+                <h2 className="text-3xl font-semibold tracking-tight">Mood Check-ins</h2>
+                <span className="text-sm text-zinc-500">{moods.length} recorded</span>
+              </div>
+              {moods.length === 0 ? (
+                <p className="text-zinc-500">
+                  No check-ins yet. They appear here when the patient taps &ldquo;How I Feel&rdquo;.
+                </p>
+              ) : (
+                <ul className="space-y-3">
+                  {moods.map((m) => (
+                    <li key={m.id} className="bg-white border rounded-2xl p-5 shadow-sm flex items-center gap-4">
+                      <span className="text-4xl shrink-0">{MOOD_EMOJI[m.mood] || "🙂"}</span>
+                      <div className="flex-1 min-w-0">
+                        <div className="font-medium capitalize">{m.mood}</div>
+                        {m.note && <div className="text-sm text-zinc-600">{m.note}</div>}
+                        <div className="text-xs text-zinc-400">{new Date(m.created_at).toLocaleString()}</div>
+                      </div>
+                      <button
+                        onClick={() => deleteMood(m.id)}
+                        className="text-zinc-400 hover:text-red-600 text-sm shrink-0"
+                        title="Remove"
+                      >
+                        ✕
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
             </div>
           )}
         </section>

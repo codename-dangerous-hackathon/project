@@ -9,7 +9,8 @@ import pytest
 
 import database.sqlite_manager as sqlite_manager
 
-EXPECTED_TABLES = {"provenance", "people", "relationships", "profile", "events", "memories"}
+EXPECTED_TABLES = {"provenance", "people", "relationships", "profile", "events", "memories", "mood_logs"}
+SCHEMA_VERSION = 2
 
 
 def _tables(conn):
@@ -23,7 +24,7 @@ def test_migrations_create_schema_and_stamp_version():
     conn = sqlite_manager.get_connection()
     try:
         assert EXPECTED_TABLES.issubset(_tables(conn))
-        assert conn.execute("PRAGMA user_version").fetchone()[0] == 1
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION
         # indexes exist
         idx = {r[0] for r in conn.execute(
             "SELECT name FROM sqlite_master WHERE type='index'"
@@ -42,7 +43,7 @@ def test_migrations_are_idempotent():
 
     c2 = sqlite_manager.get_connection()
     try:
-        assert c2.execute("PRAGMA user_version").fetchone()[0] == v1 == 1
+        assert c2.execute("PRAGMA user_version").fetchone()[0] == v1 == SCHEMA_VERSION
         assert EXPECTED_TABLES.issubset(_tables(c2))
     finally:
         c2.close()

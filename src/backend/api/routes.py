@@ -77,6 +77,10 @@ class PersonMemoryRequest(BaseModel):
 class PersonPhotoRequest(BaseModel):
     image_base64: str
 
+class MoodRequest(BaseModel):
+    mood: str  # one of MOODS
+    note: Optional[str] = ""
+
 @router.post("/ask")
 async def ask_endpoint(request: AskRequest):
     """
@@ -440,3 +444,22 @@ async def traces(n: int = 20):
     fallback) + a summary. NO conversation text — that stays in the local JSONL."""
     from services import observability
     return {"summary": observability.summary(), "traces": observability.recent_metrics(n)}
+
+# ----- Mood check-ins (patient wellbeing) -----
+
+MOODS = {"great", "good", "okay", "low", "sad"}
+
+@router.post("/mood")
+async def create_mood(request: MoodRequest):
+    if request.mood not in MOODS:
+        raise HTTPException(status_code=400, detail=f"mood must be one of {sorted(MOODS)}")
+    return {"status": "success", **store.add_mood(request.mood, request.note or "")}
+
+@router.get("/mood")
+async def get_moods():
+    return {"moods": store.list_moods()}
+
+@router.delete("/mood/{mood_id}")
+async def delete_mood_entry(mood_id: str):
+    store.delete_mood(mood_id)
+    return {"status": "deleted", "id": mood_id}
