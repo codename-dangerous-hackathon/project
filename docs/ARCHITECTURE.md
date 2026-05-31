@@ -106,5 +106,5 @@ Events (meds/appointments/activities, with `once|daily|weekly|monthly` recurrenc
 - **Known gaps (tracked in `ROADMAP.md`):**
   - The public repo's **git history** still contains real patient data + the VAPID key + e2e screenshots (untracked going forward; not purged). Remediation: make private + `git filter-repo` + rotate VAPID.
   - **No auth** — the app is reachable, unauthenticated, via the Tailscale funnel.
-  - **Reconcile resurrection** — deleting a memory whose Chroma vector survives lets the next boot's `reconcile()` re-create it as a `system` row (reconcile is Chroma→SQLite authoritative for existence).
   - The Hermes web channel's upstream LLM is configured to an off-box IP — confirm/​gate to stay on-thesis.
+- **Recently fixed:** the reconcile-resurrection bug (deleted memories reappearing as `system` rows) — `reconcile()` is now gated to a first-run bootstrap only (`reconcile_if_first_run`), since post-cutover SQLite is authoritative and writes dual-write.
