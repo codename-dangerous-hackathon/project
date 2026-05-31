@@ -1,4 +1,5 @@
 import os
+import threading
 import time
 from datetime import datetime
 from database.chroma_manager import vdb
@@ -189,4 +190,15 @@ def ask_companion(user_input: str, history=None, location=None) -> str:
         })
     except Exception:
         pass
+
+    # Remember durable facts the patient shared, across sessions (non-blocking;
+    # only on a real reply, never the fallback line).
+    if not fallback:
+        try:
+            from services import conversation_memory
+            threading.Thread(
+                target=conversation_memory.capture, args=(user_input,), daemon=True
+            ).start()
+        except Exception:
+            pass
     return reply

@@ -62,15 +62,17 @@ def delete_person(person_id: str) -> None:
 
 def record_memory(text: str, person_id: str | None = None, person_name: str = "",
                   relationship: str = "", scope: str | None = None, tags: str = "",
-                  date: str | None = None) -> str:
+                  date: str | None = None, actor: str = "caregiver",
+                  source: str = "manual_entry") -> str:
     """Write a memory to SQLite (authoritative) + Chroma (semantic index). The
     Chroma metadata exactly matches the legacy shape so vdb.query_memories and the
-    `where person_id` filters keep working."""
+    `where person_id` filters keep working. `actor`/`source` set the provenance
+    (e.g. patient/conversation for auto-captured conversation memories)."""
     mem_id = str(uuid.uuid4())
     now = _now()
     when = (date or "").strip()
     kind = "episodic" if when else "semantic"
-    prov = store.add_provenance(actor="caregiver", source="manual_entry", entered_at=now)
+    prov = store.add_provenance(actor=actor, source=source, entered_at=now)
     store.upsert_memory(mem_id, text=text, kind=kind, person_id=person_id, scope=scope,
                         tags=tags or "", event_time=(when or None), created_at=now, provenance_id=prov)
     if person_id:
