@@ -1,6 +1,6 @@
 # 🪻 Belong — A Local AI Caregiving Companion
 
-**Belong** is a private, on-device AI companion for people living with dementia — and the caregivers who support them. It runs **100% locally on the NVIDIA Spark (GB10)**: no cloud, no data leaving the home. Voice, memory, faces, schedules, and city services all stay on the device.
+**Belong** is a private, on-device AI companion for people living with dementia — and the caregivers who support them. It runs **100% locally on the NVIDIA Spark (GB10)**: no cloud, no data leaving the home. Voice, memory, faces, schedules, moods, photos, and city services all stay on the device.
 
 > Built for **The Spark Hack Series, presented by NVIDIA (Toronto)** — Public Services track, powered by **NVIDIA Nemotron** and **City of Toronto Open Data**.
 
@@ -8,60 +8,68 @@
 
 ## 💡 Why Belong
 
-Dementia steals the small certainties — *who is this person? what am I supposed to do today? where am I?* Belong answers those questions gently, over and over, without judgment, and **only from facts a caregiver has actually entered** — it never invents a name, a relationship, or an appointment. Because everything runs on the Spark in the home, the most intimate data a family has — faces, memories, routines — never touches the internet.
+Dementia steals the small certainties — *who is this person? what am I supposed to do today? where am I?* Belong answers those questions gently, over and over, without judgment, and **only from facts a caregiver (or the patient) has actually shared** — it never invents a name, a relationship, or an appointment. Because everything runs on the Spark in the home, the most intimate data a family has — faces, memories, routines, moods — never touches the internet.
 
 ---
 
 ## 🧠 The System — Everything Runs on the Spark
 
 ```
-                          ┌──────────────────────────────────────────┐
-                          │      NVIDIA Spark (GB10) — 100% local      │
-                          │                                            │
-  Patient  ──voice/text── │   Next.js PWA  ──►  FastAPI backend        │
-  Caregiver ──────────── │   (Patient · Caregiver · Map · Chat)       │
-                          │        │                  │               │
-                          │        ▼                  ▼               │
-                          │   Whisper STT        Hermes / Nemotron     │
-                          │   Piper  TTS         Nano 30B  (vLLM)      │
-                          │   InsightFace        + Memory / RAG        │
-                          │   (faces)            + Care summaries       │
-                          │        │                  │               │
-                          │        ▼                  ▼               │
-                          │   Local Data:  ChromaDB vectors · JSON     │
-                          │   stores (events/profile) · Photos         │
-                          └──────────────────────────────────────────┘
+                       ┌────────────────────────────────────────────────┐
+                       │         NVIDIA Spark (GB10) — 100% local         │
+                       │                                                  │
+ Patient  ─voice/text─ │   Next.js PWA  ──/api──►  FastAPI backend (:8001)│
+ Caregiver ──────────  │   (Patient · Caregiver · Map · Chat)             │
+                       │        │                       │                 │
+                       │        ▼                       ▼                 │
+                       │   Whisper STT            Companion agent          │
+                       │   Piper  TTS             → grounding context      │
+                       │   InsightFace            → Nemotron (vLLM :8000)  │
+                       │   (faces)                → turn trace             │
+                       │        │                       │                 │
+                       │        ▼                       ▼                 │
+                       │   Memory system: SQLite (source of truth) +      │
+                       │   ChromaDB (semantic index) + JSON · on-device   │
+                       │   photos · hybrid retrieval · provenance         │
+                       └────────────────────────────────────────────────┘
                                    ▲
-                         Toronto Open Data  +  Custom local API
-                         (city services map · nearby places · events)
+                         Toronto Open Data  +  OpenStreetMap tiles
+                         (city-services map · nearby places · events)
 ```
 
-Everything — the language model, the speech models, the face model, and the database — is served **on the Spark**. The only outbound calls are optional public-data lookups (Toronto Open Data, nearby places, community events).
+Everything — the language model, the speech models, the face model, the database, and the memory/retrieval pipeline — runs **on the Spark**. The only outbound calls are optional public-data lookups (Toronto Open Data, map tiles, community events). See **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)** for the full design.
 
 ---
 
 ## ✨ Features
 
-### 👵 Patient app (`/patient`) — voice & text companion
-- **Press-to-talk voice loop**: speak → local **Whisper** transcription → Nemotron companion → **Piper** warm voice reply.
-- **"Who is this?"** — point the camera at a person; on-device **InsightFace** matches them against enrolled family members and the companion says who they are.
-- **Memory-grounded answers** — the companion only speaks facts that are actually stored (errorless, reassuring, never guessing).
+### 👵 Patient app (`/patient`) — a calm, voice-first companion
+- **Press-to-talk voice loop**: speak → local **Whisper** transcription → companion → **Piper** warm voice reply. Multilingual (auto-detects the spoken language and replies in kind).
+- **"Who is this?"** — point the camera at a person; on-device **InsightFace** matches them against enrolled family and the companion says who they are (plus a remembered fact).
+- **🌅 Daily Briefing** — a warm "good morning" with today's date and schedule, read aloud.
+- **🙂 Mood check-in** — tap how you feel; logged for the caregiver to see.
+- **📷 Photo Journal** — browse captioned photo memories, tap any to hear the story.
+- **📖 Memories / 👤 About Me** — life-story facts and family, grouped and tap-to-hear.
+- **Memory-grounded, errorless answers** — the companion speaks only stored facts, gently admits uncertainty, and **never quizzes or corrects**.
 
-### 🧑‍⚕️ Caregiver app (`/caregiver`) — manage the patient's world
-- Enroll **family members** (name, relationship, optional photo) and record **memories** about each.
-- Manage **reminders & appointments** (medications, visits) with **Web Push** notifications.
-- Review the **journal** — everything Belong knows, grouped by person.
+### 🧑‍⚕️ Caregiver app (`/caregiver`)
+- Enroll **family members** (name, relationship, optional photo) and record **memories**.
+- Manage **reminders & appointments** (medications, visits) with **Web Push** notifications and a month-grid calendar.
+- **💚 Wellbeing** — review the patient's mood check-in history.
+- **Photo Memories** — add a photo + caption that appears in the patient's Photo Journal.
+- Review the **journal** — everything Belong knows, grouped by person, each fact showing **who added it and when**.
 
 ### 🗺️ City services map (`/map`)
-- **Leaflet + OpenStreetMap** map of Toronto plotting **City of Toronto Open Data** points, with per-dataset toggles, plus nearby-places and community-event discovery.
+- **Leaflet + OpenStreetMap** map of Toronto plotting **City of Toronto Open Data** (washrooms, long-term-care homes, community centres), with a "nearest to me" finder.
 
 ### 🤖 Hermes chat (`/hermes`)
-- A text chat surface backed by the **Hermes** agent (Nemotron Nano 30B), grounded with the same memories, schedule, and family roster.
+- A text chat surface backed by the **Hermes** agent (Nemotron), grounded with the same memories, schedule, and family roster.
 
-### 🧠 AI layer — Hermes, powered by Nemotron Nano 30B
-- **Companion conversation** grounded by **RAG** over the patient's life-story memories and family roster.
-- **Care summaries / morning briefing** generated from the schedule.
-- **Anti-hallucination by design** — strict instructions to use only stored facts and to gently admit uncertainty otherwise.
+### 🧠 Under the hood — a real memory system
+- **SQLite is the source of truth** for structured facts (people, relationships, events, profile, memories, provenance); **ChromaDB** is the semantic index; legacy JSON is dual-written for safety.
+- **Hybrid retrieval + rerank** — vector similarity + keyword overlap + temporal decay (semantic vs episodic) + use-frequency, tuned against a recall benchmark.
+- **Conversation memory** — the companion **remembers across sessions**: it distills durable facts the patient shares into episodic memories and recalls them later.
+- **Nightly consolidation** of near-duplicate memories; **provenance** on every fact; **observability** (`/health`, `/traces`) for every companion turn — all on-device.
 
 ---
 
@@ -70,12 +78,11 @@ Everything — the language model, the speech models, the face model, and the da
 | Layer | Technology |
 |---|---|
 | **LLM** | NVIDIA **Nemotron Nano 30B** (`NVIDIA-Nemotron-3-Nano-30B-A3B-NVFP4`) served locally via **vLLM** |
-| **Agent** | **Hermes** (NemoClaw) — OpenAI-compatible local agent with memory grounding |
-| **Speech** | **faster-whisper** (STT) · **Piper** (TTS) — fully on-device |
+| **Speech** | **faster-whisper** (STT) · **Piper** (TTS) · **langdetect** — fully on-device |
 | **Vision** | **InsightFace** (`buffalo_l`: RetinaFace + ArcFace) via **onnxruntime** |
-| **Memory / RAG** | **ChromaDB** (SQLite-backed) with `all-MiniLM-L6-v2` embeddings |
+| **Memory** | **SQLite** (source of truth, `PRAGMA user_version` migrations) + **ChromaDB** (`all-MiniLM-L6-v2`) semantic index + hybrid retrieval/rerank |
 | **Backend** | **FastAPI** + Uvicorn (localhost-only, port `8001`) |
-| **Frontend** | **Next.js 16** Progressive Web App (port `3000`) + **Leaflet** |
+| **Frontend** | **Next.js 16** PWA (port `3000`) + **Leaflet** + Web Push |
 | **Open Data** | **City of Toronto Open Data** + custom local service API |
 | **Hardware** | **NVIDIA Spark (GB10)** — Grace-Blackwell, unified memory, ARM64/CUDA |
 
@@ -84,9 +91,9 @@ Everything — the language model, the speech models, the face model, and the da
 ## 🔒 Privacy
 
 - The backend binds to **`127.0.0.1` only**.
-- Faces are stored **as embeddings, never as images leaving the device**.
-- Memories, schedules, and profiles live in **local stores on the Spark**.
-- The language, speech, and vision models all run **locally** — no third-party AI APIs.
+- Faces are stored **as embeddings, never as images leaving the device**; photos are local on-device thumbnails.
+- Memories, schedules, profiles, moods, and per-turn traces live in **local stores on the Spark**.
+- The language, speech, and vision models all run **locally** — no third-party AI APIs. Belong can demo with **wifi physically off** (web-push reminders and the map are the only internet-using extras).
 
 ---
 
@@ -94,39 +101,29 @@ Everything — the language model, the speech models, the face model, and the da
 
 ```
 src/
-├── backend/                 FastAPI app (localhost:8001)
-│   ├── main.py              app bootstrap, model warmup, reminder scheduler
-│   ├── api/routes.py        all HTTP endpoints
-│   ├── agents/companion.py  RAG companion (memories + schedule → Nemotron)
+├── backend/                  FastAPI app (localhost:8001)
+│   ├── main.py               bootstrap; model warmup; reconcile; reminder scheduler
+│   ├── api/routes.py         all HTTP endpoints
+│   ├── agents/companion.py   the grounded companion (context → Nemotron → trace)
 │   ├── database/
-│   │   ├── chroma_manager.py  ChromaDB: memories · people · face embeddings
-│   │   └── data/              ChromaDB store (local)
-│   ├── tools/
-│   │   ├── audio.py         Whisper STT + Piper TTS
-│   │   └── vision.py        InsightFace enroll / recognize
-│   ├── services/            reminders · places · photos · profile · events
-│   └── data/                events.json (schedule), profile
-└── frontend/                Next.js 16 PWA (localhost:3000)
-    └── app/                 / · /patient · /caregiver · /map · /hermes
+│   │   ├── sqlite_manager.py + migrations.py   SQLite + user_version migrations
+│   │   ├── store.py          typed SQLite data-access (source of truth)
+│   │   ├── writes.py         dual-write coordinator (SQLite + Chroma)
+│   │   ├── retrieval.py      hybrid retrieval + rerank
+│   │   └── chroma_manager.py ChromaDB: memories · people · face embeddings
+│   ├── services/
+│   │   ├── reminders.py · profile.py · places.py · eventbrite.py · photos.py
+│   │   ├── conversation_memory.py   remember durable facts across sessions
+│   │   ├── consolidation.py         nightly near-duplicate merge
+│   │   └── observability.py         per-turn traces + summary
+│   ├── tools/  audio.py (Whisper/Piper) · vision.py (InsightFace)
+│   └── tests/  77 hermetic backend tests (LLM + models mocked, state in tmp)
+└── frontend/                 Next.js 16 PWA (localhost:3000)
+    └── app/  / · /patient · /caregiver · /map · /hermes
 
-hermes-agent/                Config/helpers for the separately-provisioned Hermes agent
-├── SOUL.md                  Hermes persona (Belong dementia-companion identity)
-├── SOUL.default.md          stock persona backup
-├── memory-proxy/            memory-injecting proxy (RAG grounding for the Hermes web channel)
-└── webchat/                 standalone OpenAI-compatible chat front end
+docs/        ARCHITECTURE.md · ROADMAP.md · PHASE2_MEMORY_PLAN.md · CLAUDE_CODE_GUIDE.md
+hermes-agent/  config/helpers for the separately-provisioned Hermes agent
 ```
-
----
-
-## 🤖 Hermes Agent (provisioned separately)
-
-The **Hermes** agent is **not** started by `make start`. It runs as its own service — a **NemoClaw** security-sandboxed agent wired to the locally-served Nemotron model — and is set up independently of the Belong app. The Belong repo only includes its **supporting config and helpers** under `hermes-agent/`:
-
-- **`SOUL.md`** — the Hermes persona, customized into Belong's warm, errorless-learning dementia companion (`SOUL.default.md` keeps the stock persona).
-- **`memory-proxy/`** — a small proxy that sits in front of Hermes' OpenAI-compatible API and injects the patient's memories, family roster, and schedule into each request **read-only**, so the Hermes web channel is grounded in exactly the same facts as the in-app companion (without ever writing to the app's database).
-- **`webchat/`** — a self-contained chat front end for the Hermes endpoint.
-
-The core Belong app (patient + caregiver) talks to the Nemotron vLLM endpoint directly (`NIM_BASE_URL`); the Hermes agent is an additional, optional channel.
 
 ---
 
@@ -135,21 +132,12 @@ The core Belong app (patient + caregiver) talks to the Nemotron vLLM endpoint di
 **Prerequisites:** NVIDIA Spark (or a CUDA box), Python 3.12, Node.js 20+, and a local **Nemotron** endpoint served via vLLM (OpenAI-compatible) on `:8000`.
 
 ```bash
-# 1. Install backend (venv) + frontend (npm) dependencies
-make install
-
-# 2. Build the Next.js production bundle
-make build
-
-# 3. Start backend (:8001) and frontend (:3000)
-make start
+make install   # backend venv (requirements.txt) + frontend npm deps
+make build     # Next.js production bundle (serve prod — see CLAUDE.md)
+make start     # backend :8001 + frontend :3000 in the background
 ```
 
-Then open **http://localhost:3000**. Useful targets: `make logs`, `make stop`.
-
-**Key env vars** (backend):
-- `NIM_BASE_URL` — local LLM endpoint (default `http://localhost:8000/v1`)
-- `NIM_MODEL` — optional model id override (otherwise auto-detected)
+Open **http://localhost:3000**. Useful: `make logs`, `make stop`. Key backend env vars: `NIM_BASE_URL` (default `http://localhost:8000/v1`), `NIM_MODEL` (optional override; otherwise auto-detected).
 
 ---
 
@@ -158,18 +146,20 @@ Then open **http://localhost:3000**. Useful targets: `make logs`, `make stop`.
 | Area | Endpoints |
 |---|---|
 | **Voice** | `POST /transcribe` (STT) · `POST /synthesize` (TTS) |
-| **Companion** | `POST /ask` · `GET /briefing` (morning care summary) |
-| **People & faces** | `POST /people` · `POST /enroll` · `POST /identify` · `GET /faces` |
-| **Memories** | `POST /people/{id}/memories` · `GET /memories` · `GET /journal` |
-| **Schedule** | `GET/POST /events` · `POST /push/subscribe` · `POST /push/test` |
+| **Companion** | `POST /ask` · `GET /briefing` |
+| **People & faces** | `POST/GET/DELETE /people` · `POST /identify` · `POST /people/{id}/photo` |
+| **Memories** | `POST /enroll_memory` · `POST /memories/photo` · `GET /memories` · `GET /journal` · `GET /photo-journal` |
+| **Schedule** | `GET/POST/DELETE /events` · `POST /push/subscribe` |
+| **Wellbeing** | `POST/GET/DELETE /mood` |
 | **City services** | `GET /places/nearest` · `GET /discover/events` · `/map/data/{dataset}` |
 | **Profile** | `GET/POST /profile` |
+| **Ops** | `GET /health` · `GET /traces` |
 
 ---
 
 ## 🏆 NVIDIA Ecosystem
 
-Belong is built on **NVIDIA Nemotron** running locally via vLLM on the **Spark (GB10)** — no external LLM APIs. The Nemotron model powers companion conversation, retrieval-augmented memory grounding, and care-summary generation, combined with the City of Toronto Open Data for the public-services map.
+Belong runs on **NVIDIA Nemotron** locally via vLLM on the **Spark (GB10)** — no external LLM APIs. Nemotron powers companion conversation, retrieval-augmented memory grounding, care-summary generation, and the conversation-memory distillation, combined with City of Toronto Open Data for the public-services map.
 
 ---
 
