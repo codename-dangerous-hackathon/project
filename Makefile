@@ -16,11 +16,11 @@ build:
 	@echo "✅ Frontend built successfully."
 
 # Start both the backend and frontend in the background
-start:
+start: stop
 	@echo "Starting Backend (FastAPI)..."
-	@cd src/backend && nohup ../../venv/bin/uvicorn main:app --host 127.0.0.1 --port 8001 --reload > ../../backend.log 2>&1 & echo $$! > backend.pid
+	@cd src/backend && setsid nohup ../../venv/bin/uvicorn main:app --host 127.0.0.1 --port 8001 --reload > ../../backend.log 2>&1 & echo $$! > backend.pid
 	@echo "Starting Frontend (Next.js)..."
-	@cd src/frontend && nohup npm start > ../../frontend.log 2>&1 & echo $$! > frontend.pid
+	@cd src/frontend && setsid nohup npm start > ../../frontend.log 2>&1 & echo $$! > frontend.pid
 	@echo "========================================="
 	@echo "✅ Belong is running in the background!"
 	@echo "Frontend: http://localhost:3000"
@@ -29,12 +29,14 @@ start:
 	@echo "To stop, run:      make stop"
 	@echo "========================================="
 
-# Stop the background processes
+# Stop the background processes (kills the whole process group, then any
+# orphan still holding the ports — robust against failed/double starts)
 stop:
 	@echo "Stopping Backend..."
-	@-if [ -f backend.pid ]; then kill `cat backend.pid` 2>/dev/null || true; rm -f backend.pid; fi
+	@-if [ -f backend.pid ]; then kill -- -`cat backend.pid` 2>/dev/null || true; rm -f backend.pid; fi
 	@echo "Stopping Frontend..."
-	@-if [ -f frontend.pid ]; then kill `cat frontend.pid` 2>/dev/null || true; rm -f frontend.pid; fi
+	@-if [ -f frontend.pid ]; then kill -- -`cat frontend.pid` 2>/dev/null || true; rm -f frontend.pid; fi
+	@-fuser -k 8001/tcp 3000/tcp 2>/dev/null || true
 	@echo "🛑 Belong has been stopped."
 
 # Tail the logs for both services
