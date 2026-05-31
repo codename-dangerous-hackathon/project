@@ -203,3 +203,32 @@ def delete_event(event_id: str) -> None:
     with closing(sqlite_manager.get_connection()) as conn:
         conn.execute("DELETE FROM events WHERE id = ?", (event_id,))
         conn.commit()
+
+
+# ----- retrieval support (Step 5) --------------------------------------------
+
+def get_memories_by_ids(ids: list[str]) -> dict[str, dict]:
+    """Full memory rows keyed by id, for reranking vector candidates."""
+    if not ids:
+        return {}
+    placeholders = ",".join("?" for _ in ids)
+    with closing(sqlite_manager.get_connection()) as conn:
+        rows = conn.execute(
+            f"SELECT id, text, kind, person_id, scope, tags, event_time, created_at, "
+            f"last_used_at, use_count, superseded_by FROM memories WHERE id IN ({placeholders})",
+            tuple(ids),
+        ).fetchall()
+    return {r["id"]: dict(r) for r in rows}
+
+
+def bump_memory_usage(ids: list[str], now: str) -> None:
+    """Record that these memories were surfaced (feeds the frequency signal)."""
+    if not ids:
+        return
+    placeholders = ",".join("?" for _ in ids)
+    with closing(sqlite_manager.get_connection()) as conn:
+        conn.execute(
+            f"UPDATE memories SET use_count = use_count + 1, last_used_at = ? WHERE id IN ({placeholders})",
+            (now, *ids),
+        )
+        conn.commit()

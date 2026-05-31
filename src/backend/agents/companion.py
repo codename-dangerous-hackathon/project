@@ -47,12 +47,11 @@ RULES (STRICT):
 """
 
 def fetch_revelant_memories(user_query: str) -> str:
-    """Retrieve facts from ChromaDB to inject into the LLM context."""
-    results = vdb.query_memories(query_text=user_query, n_results=2)
-    memories = ""
-    if results['documents'] and results['documents'][0]:
-        memories = " ".join(results['documents'][0])
-    return memories
+    """Retrieve the most relevant life-story facts to inject into the LLM context,
+    via the hybrid reranker (similarity + keyword + recency + frequency)."""
+    from database import retrieval
+    hits = retrieval.retrieve(user_query, k=3)
+    return " ".join(h["text"] for h in hits)
 
 def build_family_context() -> str:
     """A roster of the enrolled family members and the facts about each one,
