@@ -1,26 +1,21 @@
 "use client";
 
-// Hidden /hermes page — a self-contained chat client for the Hermes agent.
-// Unlinked: nothing in the app navigates here, you reach it by typing the URL.
-// It talks to "/v1" (same origin) which is proxied to Hermes by
-// app/v1/[...path]/route.ts, so there is no CORS to deal with.
-//
-// All markup/logic is faithfully ported from hermes-agent/webchat/hermes-chat.html.
+// /hermes — a text-chat surface for the Belong companion. It talks to the SAME
+// grounded backend the voice agent uses (POST /api/ask -> ask_companion), so it
+// knows the patient's profile, family roster, schedule, and memories. (It used
+// to call a separate off-box Hermes upstream via /v1, which is why it didn't
+// know "who am I" — that path is no longer used.)
 import { useEffect, useRef } from "react";
 import Link from "next/link";
 
-// ===================== CONFIG =====================
-const BASE_URL = "/v1"; // proxied same-origin to Hermes (no CORS, no 403)
-const MODEL = "hermes-agent";
-const API_KEY = ""; // bearer token if you later enable auth on the gateway
-const SYSTEM = ""; // optional system prompt prepended to every conversation
-// Auto-greeting on open: a hidden prompt asks the LLM to greet, so the opening
-// line reflects the Belong persona + injected memories/schedule. STATIC_GREETING
-// is shown if the model is unreachable, so the screen is never blank or scary.
+// Auto-greeting on open: a hidden prompt asks the companion to greet, so the
+// opening line reflects the persona + grounded context. STATIC_GREETING shows if
+// the model is unreachable, so the screen is never blank or scary.
 const GREETING_PROMPT =
   "The patient has just opened the chat. Greet them warmly in one or two short sentences to gently start the conversation.";
 const STATIC_GREETING = "Hello, I'm Belong. I'm right here with you. How are you feeling today?";
-// =================================================
+
+type Turn = { role: "user" | "assistant"; content: string };
 
 export default function HermesPage() {
   const rootRef = useRef<HTMLDivElement | null>(null);
@@ -36,10 +31,10 @@ export default function HermesPage() {
     const send = $("hc-send") as HTMLButtonElement;
     const status = $("hc-status")!;
     const model = $("hc-model")!;
-    model.textContent = MODEL;
+    model.textContent = "belong companion";
 
-    type Turn = { role: "system" | "user" | "assistant"; content: string };
-    const history: Turn[] = SYSTEM ? [{ role: "system", content: SYSTEM }] : [];
+    // Prior turns sent to ask_companion as `history` (same shape the voice page uses).
+    const history: Turn[] = [];
 
     function addBubble(role: "user" | "bot" | "err", content: string) {
       const row = document.createElement("div");
@@ -53,15 +48,9 @@ export default function HermesPage() {
       return b;
     }
 
-    function headers(): Record<string, string> {
-      const h: Record<string, string> = { "Content-Type": "application/json" };
-      if (API_KEY) h["Authorization"] = "Bearer " + API_KEY;
-      return h;
-    }
-
     async function ping() {
       try {
-        const r = await fetch(BASE_URL + "/models", { headers: headers() });
+        const r = await fetch("/api/health");
         status.classList.toggle("ok", r.ok);
       } catch {
         status.classList.remove("ok");
@@ -69,65 +58,36 @@ export default function HermesPage() {
     }
     ping();
 
-    // Stream one assistant reply for the current `history`. On error, shows
-    // `fallback` as a normal bubble if given (used by the greeting), else an
-    // error bubble. Returns whether it succeeded.
-    async function streamAssistant(opts: { fallback?: string } = {}) {
+    // One grounded reply from the backend companion. `record:false` keeps the
+    // hidden greeting prompt out of the conversation history. Returns success.
+    async function ask(userInput: string, opts: { fallback?: string; record?: boolean } = {}) {
       send.disabled = true;
       const bubble = addBubble("bot", "");
       const cursor = document.createElement("span");
       cursor.className = "hc-cursor";
       bubble.appendChild(cursor);
-
-      let acc = "";
       try {
-        const resp = await fetch(BASE_URL + "/chat/completions", {
+        const resp = await fetch("/api/ask", {
           method: "POST",
-          headers: headers(),
-          body: JSON.stringify({ model: MODEL, messages: history, stream: true }),
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ user_input: userInput, history }),
         });
-        if (!resp.ok || !resp.body)
-          throw new Error("HTTP " + resp.status + " " + (await resp.text()).slice(0, 300));
-
-        const reader = resp.body.getReader();
-        const dec = new TextDecoder();
-        let buf = "";
-        for (;;) {
-          const { value, done } = await reader.read();
-          if (done) break;
-          buf += dec.decode(value, { stream: true });
-          const lines = buf.split("\n");
-          buf = lines.pop() ?? ""; // keep partial line
-          for (const line of lines) {
-            const s = line.trim();
-            if (!s.startsWith("data:")) continue;
-            const payload = s.slice(5).trim();
-            if (payload === "[DONE]") continue;
-            try {
-              const delta = JSON.parse(payload).choices?.[0]?.delta?.content;
-              if (delta) {
-                acc += delta;
-                bubble.textContent = acc;
-                bubble.appendChild(cursor);
-                log.scrollTop = log.scrollHeight;
-              }
-            } catch {
-              /* ignore keep-alive / non-JSON lines */
-            }
-          }
-        }
+        if (!resp.ok) throw new Error("HTTP " + resp.status);
+        const reply = ((await resp.json()).reply || "").trim();
         cursor.remove();
-        if (!acc) bubble.textContent = "(empty response)";
-        history.push({ role: "assistant", content: acc });
+        bubble.textContent = reply || "(no reply)";
+        if (opts.record !== false) {
+          history.push({ role: "user", content: userInput });
+          history.push({ role: "assistant", content: reply });
+        }
         return true;
       } catch (e) {
         cursor.remove();
         if (opts.fallback) {
           bubble.textContent = opts.fallback; // never show the patient a raw error
-          history.push({ role: "assistant", content: opts.fallback });
         } else {
           bubble.className = "hc-bubble err";
-          bubble.textContent = "Error: " + (e as Error).message;
+          bubble.textContent = "Sorry, I couldn't reach the companion just now. " + (e as Error).message;
         }
         return false;
       } finally {
@@ -142,16 +102,13 @@ export default function HermesPage() {
       text.value = "";
       autoGrow();
       addBubble("user", content);
-      history.push({ role: "user", content });
-      const ok = await streamAssistant();
-      if (!ok) history.pop(); // drop the user turn so retry is clean
+      await ask(content, { record: true });
     }
 
-    // Greet the patient on open by prompting the LLM (hidden user turn, so the
-    // first visible bubble is the assistant's warm hello).
+    // Greet the patient on open (hidden prompt -> the first visible bubble is the
+    // companion's warm hello, grounded in who they are).
     async function autoGreet() {
-      history.push({ role: "user", content: GREETING_PROMPT });
-      await streamAssistant({ fallback: STATIC_GREETING });
+      await ask(GREETING_PROMPT, { fallback: STATIC_GREETING, record: false });
     }
 
     function autoGrow() {
@@ -172,7 +129,6 @@ export default function HermesPage() {
     text.addEventListener("keydown", onKeydown);
     send.addEventListener("click", onSend);
 
-    // Open with a warm greeting (once).
     if (!startedRef.current) {
       startedRef.current = true;
       autoGreet();
@@ -259,15 +215,11 @@ export default function HermesPage() {
           </Link>
           <span className="hc-dot" id="hc-status" aria-hidden="true" />
           <span className="hc-title">Belong Text Companion</span>
-          <small id="hc-model">hermes-agent</small>
+          <small id="hc-model">belong companion</small>
         </div>
         <div className="hc-log" id="hc-log" />
         <div className="hc-input">
-          <textarea
-            id="hc-text"
-            rows={1}
-            placeholder="Message Belong…  (Enter to send, Shift+Enter for newline)"
-          />
+          <textarea id="hc-text" rows={1} placeholder="Message Belong…" />
           <button id="hc-send">Send</button>
         </div>
       </div>
