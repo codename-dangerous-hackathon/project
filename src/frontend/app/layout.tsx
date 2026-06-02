@@ -21,13 +21,13 @@ export const viewport: Viewport = {
 };
 
 export const metadata: Metadata = {
-  title: "Anchor | On-device AI Companion",
+  title: "Belong | On-device AI Companion",
   description: "A 100% on-device AI companion for dementia care. Powered by NVIDIA GB10.",
   manifest: "/manifest.webmanifest",
   appleWebApp: {
     capable: true,
     statusBarStyle: "black-translucent",
-    title: "Anchor",
+    title: "Belong",
   },
   formatDetection: {
     telephone: false,
@@ -49,9 +49,21 @@ export default function RootLayout({
           dangerouslySetInnerHTML={{
             __html: `
               if ('serviceWorker' in navigator) {
+                // When a new service worker takes control (after a deploy),
+                // reload once automatically so the device runs the latest code
+                // and never shows stale data. The flag prevents reload loops.
+                var __refreshing = false;
+                navigator.serviceWorker.addEventListener('controllerchange', function() {
+                  if (__refreshing) return;
+                  __refreshing = true;
+                  window.location.reload();
+                });
                 window.addEventListener('load', function() {
                   navigator.serviceWorker.register('/sw.js').then(
-                    function(registration) { console.log('ServiceWorker registration successful'); },
+                    function(reg) {
+                      // Check for an updated service worker on every load.
+                      reg.update();
+                    },
                     function(err) { console.log('ServiceWorker registration failed: ', err); }
                   );
                 });

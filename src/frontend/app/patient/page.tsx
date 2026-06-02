@@ -3,6 +3,27 @@
 import { useState, useRef, useEffect, useCallback } from "react";
 import Link from "next/link";
 
+// Family member avatar — shows the stored photo, falls back to their initial.
+function FamilyAvatar({ id, name }: { id: string; name: string }) {
+  const [err, setErr] = useState(false);
+  if (err) {
+    return (
+      <div className="w-16 h-16 shrink-0 rounded-full bg-zinc-700 flex items-center justify-center text-2xl font-semibold text-zinc-200">
+        {name?.[0]?.toUpperCase() || "?"}
+      </div>
+    );
+  }
+  return (
+    // eslint-disable-next-line @next/next/no-img-element
+    <img
+      src={`/api/people/${id}/photo`}
+      alt={name}
+      onError={() => setErr(true)}
+      className="w-16 h-16 shrink-0 rounded-full object-cover border border-zinc-600"
+    />
+  );
+}
+
 // VAPID public key (base64url) -> Uint8Array for PushManager.subscribe.
 function urlBase64ToUint8Array(base64String: string) {
   const padding = "=".repeat((4 - (base64String.length % 4)) % 4);
@@ -30,6 +51,16 @@ export default function PatientPage() {
   const micStreamRef = useRef<MediaStream | null>(null);
   // Multi-turn history so the companion can actually follow the conversation.
   const historyRef = useRef<{ role: "user" | "assistant"; content: string }[]>([]);
+  // Patient's location (for "where is the nearest washroom / care home?").
+  const locationRef = useRef<{ lat: number; lng: number } | null>(null);
+  const ensureLocation = () => {
+    if (locationRef.current || typeof navigator === "undefined" || !navigator.geolocation) return;
+    navigator.geolocation.getCurrentPosition(
+      (pos) => { locationRef.current = { lat: pos.coords.latitude, lng: pos.coords.longitude }; },
+      () => { /* denied/unavailable — the companion just won't know the location */ },
+      { enableHighAccuracy: false, timeout: 8000, maximumAge: 300000 }
+    );
+  };
 
   // Attach the camera stream once the <video> element is actually mounted.
   // The video is only rendered when status === "camera", so we cannot assign
@@ -49,7 +80,7 @@ export default function PatientPage() {
 
   const openMemories = async () => {
     try {
-      const res = await fetch("/api/journal");
+      const res = await fetch("/api/journal", { cache: "no-store" });
       const data = await res.json();
       setPeople((data.people || []).filter((p: PersonGroup) => p.memories.length > 0));
       setGeneral(data.general || []);
@@ -75,6 +106,100 @@ export default function PatientPage() {
     } catch {
       /* ignore */
     }
+  };
+
+  // --- Daily Briefing (a warm "good morning" summary of today) ---
+  const [briefingOpen, setBriefingOpen] = useState(false);
+  const [briefing, setBriefing] = useState("");
+
+  const openBriefing = async () => {
+    let text = "Good morning.";
+    try {
+      const res = await fetch("/api/briefing", { cache: "no-store" });
+      text = (await res.json()).briefing || text;
+    } catch {
+      /* keep the gentle default */
+    }
+    setBriefing(text);
+    setBriefingOpen(true);
+    speakText(text); // read it aloud, like About Me
+  };
+
+  // --- Mood check-in (how are you feeling today?) ---
+  const MOODS = [
+    { key: "great", emoji: "😊", label: "Great" },
+    { key: "good", emoji: "🙂", label: "Good" },
+    { key: "okay", emoji: "😐", label: "Okay" },
+    { key: "low", emoji: "😟", label: "Low" },
+    { key: "sad", emoji: "😢", label: "Sad" },
+  ];
+  const [moodOpen, setMoodOpen] = useState(false);
+  const [moodLogged, setMoodLogged] = useState(false);
+
+  const openMood = () => {
+    setMoodLogged(false);
+    setMoodOpen(true);
+  };
+
+  const logMood = async (mood: string) => {
+    try {
+      await fetch("/api/mood", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ mood }),
+      });
+    } catch {
+      /* still acknowledge — the patient should never feel an error */
+    }
+    setMoodLogged(true);
+    speakText("Thank you for sharing how you feel. I am right here with you.");
+  };
+
+  // --- Photo Journal (pictures with captions, tap to hear) ---
+  const [photoJournalOpen, setPhotoJournalOpen] = useState(false);
+  const [photoJournal, setPhotoJournal] = useState<{ id: string; caption: string }[]>([]);
+
+  const openPhotoJournal = async () => {
+    try {
+      const res = await fetch("/api/photo-journal", { cache: "no-store" });
+      setPhotoJournal((await res.json()).photos || []);
+    } catch {
+      setPhotoJournal([]);
+    }
+    setPhotoJournalOpen(true);
+  };
+
+  // --- About Me (who you are: name, photo, your story, your family) ---
+  type Person = { id: string; name: string; relationship: string };
+  const [aboutOpen, setAboutOpen] = useState(false);
+  const [profile, setProfile] = useState<{
+    name?: string;
+    tagline?: string;
+    photo?: string;
+    emergency_name?: string;
+    emergency_phone?: string;
+  }>({});
+  const [aboutPeople, setAboutPeople] = useState<Person[]>([]);
+  const [aboutGeneral, setAboutGeneral] = useState<Mem[]>([]);
+
+  const openAbout = async () => {
+    let prof: { name?: string; tagline?: string; photo?: string } = {};
+    try {
+      const [p, j] = await Promise.all([
+        fetch("/api/profile", { cache: "no-store" }).then((r) => r.json()),
+        fetch("/api/journal", { cache: "no-store" }).then((r) => r.json()),
+      ]);
+      prof = p || {};
+      setProfile(prof);
+      setAboutPeople(j.people || []);
+      setAboutGeneral(j.general || []);
+    } catch {
+      setProfile({});
+      setAboutPeople([]);
+      setAboutGeneral([]);
+    }
+    setAboutOpen(true);
+    if (prof.name) speakText(`You are ${prof.name}.${prof.tagline ? " " + prof.tagline : ""}`);
   };
 
   // --- Reminders (medication / appointment / family push notifications) ---
@@ -151,6 +276,7 @@ export default function PatientPage() {
 
   const startListening = async () => {
     try {
+      ensureLocation(); // start fetching location while they speak
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       micStreamRef.current = stream;
       audioChunksRef.current = [];
@@ -202,7 +328,11 @@ export default function PatientPage() {
       const askRes = await fetch("/api/ask", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ user_input: heard, history: historyRef.current }),
+        body: JSON.stringify({
+          user_input: heard,
+          history: historyRef.current,
+          location: locationRef.current || undefined,
+        }),
       });
       const { reply } = await askRes.json();
       const answer = reply || "I'm right here with you.";
@@ -311,7 +441,15 @@ export default function PatientPage() {
   };
 
   return (
-    <main className="flex flex-col items-center justify-center w-full min-h-[100dvh] bg-black text-white p-4 font-sans select-none relative">
+    <main className="flex flex-col items-center w-full min-h-[100dvh] bg-[linear-gradient(to_bottom,#15605e_0%,#000000_60%)] text-white px-4 pt-20 pb-6 font-sans select-none relative overflow-y-auto justify-center gap-3">
+      <style>{`
+        @media (max-height: 700px) {
+          .talk-btn-idle { height: 12rem !important; width: 12rem !important; }
+          .talk-btn-listening { height: 14rem !important; width: 14rem !important; }
+          .talk-btn-other { height: 12rem !important; width: 12rem !important; }
+          .secondary-actions { margin-top: 2rem !important; }
+        }
+      `}</style>
       
       {/* Subtle Home Button in Top Left */}
       <Link href="/" className="absolute top-6 left-6 p-3 text-zinc-600 hover:text-zinc-300 transition-colors bg-zinc-900/50 hover:bg-zinc-800 rounded-full" title="Back to Home">
@@ -321,17 +459,23 @@ export default function PatientPage() {
       {/* Enable reminders (top right) */}
       <button
         onClick={enableReminders}
-        className="absolute top-6 right-6 px-4 py-3 text-sm text-zinc-400 hover:text-zinc-100 bg-zinc-900/50 hover:bg-zinc-800 rounded-full transition-colors"
+        className="absolute top-6 right-6 px-3 py-3 text-sm text-zinc-400 hover:text-zinc-100 bg-zinc-900/50 hover:bg-zinc-800 rounded-full transition-colors"
         title="Enable medication & event reminders"
       >
-        {remindersOn ? "🔔 Reminders on" : "🔕 Turn on reminders"}
+        <span className="hidden sm:inline">{remindersOn ? "🔔 Reminders on" : "🔕 Turn on reminders"}</span>
+        <span className="sm:hidden">{remindersOn ? "🔔" : "🔕"}</span>
       </button>
 
-      {/* Full-screen reminder card (medication / appointment / family) */}
+      {/* Full-screen reminder card (medication / appointment / family / waste_pickup) */}
       {reminder && (
         <div className="absolute inset-0 z-30 bg-black/95 flex flex-col items-center justify-center p-8 text-center">
           <div className="text-8xl mb-6">
-            {reminder.type === "medication" ? "💊" : reminder.type === "appointment" ? "📅" : reminder.type === "family" ? "👪" : "🔔"}
+            {reminder.type === "medication" ? "💊"
+              : reminder.type === "appointment" ? "📅"
+              : reminder.type === "activity" ? "🎟️"
+              : reminder.type === "family" ? "👪"
+              : reminder.type === "waste_pickup" ? "♻️"
+              : "🔔"}
           </div>
           <h2 className="text-5xl md:text-6xl font-semibold text-white mb-4 max-w-3xl leading-tight">
             {reminder.title}
@@ -343,13 +487,15 @@ export default function PatientPage() {
             onClick={() => setReminder(null)}
             className="bg-emerald-600 hover:bg-emerald-500 text-white text-3xl font-bold rounded-full px-16 py-8 shadow-2xl active:scale-95 transition-transform"
           >
-            {reminder.type === "medication" ? "✓ I took it" : "✓ Okay"}
+            {reminder.type === "medication" ? "✓ I took it"
+              : reminder.type === "waste_pickup" ? "✓ I'll put the bins out"
+              : "✓ Okay"}
           </button>
         </div>
       )}
 
       {/* Dynamic Header */}
-      <h1 className="text-4xl md:text-5xl font-medium text-center text-zinc-300 mb-2 max-w-2xl px-4 min-h-[5rem]">
+      <h1 className="text-3xl md:text-5xl font-medium text-center text-zinc-300 max-w-2xl px-2 min-h-[3.5rem]">
         {subtitle}
       </h1>
 
@@ -378,10 +524,10 @@ export default function PatientPage() {
           onClick={handleTalk}
           disabled={status === "thinking"}
           className={`relative rounded-full transition-all duration-300 flex items-center justify-center shadow-2xl
-            ${status === "idle" ? "bg-amber-600 hover:bg-amber-500 hover:scale-105 active:scale-95 h-64 w-64 md:h-80 md:w-80" : ""}
-            ${status === "listening" ? "bg-red-600 animate-pulse h-72 w-72 md:h-96 md:w-96" : ""}
-            ${status === "thinking" ? "bg-zinc-600 animate-pulse h-64 w-64 md:h-80 md:w-80" : ""}
-            ${status === "speaking" ? "bg-emerald-600 animate-pulse h-64 w-64 md:h-80 md:w-80 shadow-[0_0_80px_rgba(5,150,105,0.6)]" : ""}
+            ${status === "idle" ? "talk-btn-idle bg-amber-600 hover:bg-amber-500 hover:scale-105 active:scale-95 h-64 w-64 md:h-80 md:w-80" : ""}
+            ${status === "listening" ? "talk-btn-listening bg-red-600 animate-pulse h-72 w-72 md:h-96 md:w-96" : ""}
+            ${status === "thinking" ? "talk-btn-other bg-zinc-600 animate-pulse h-64 w-64 md:h-80 md:w-80" : ""}
+            ${status === "speaking" ? "talk-btn-other bg-emerald-600 animate-pulse h-64 w-64 md:h-80 md:w-80 shadow-[0_0_80px_rgba(5,150,105,0.6)]" : ""}
           `}
         >
           <span className="text-3xl md:text-4xl font-bold tracking-wide px-4 text-center leading-tight">
@@ -394,20 +540,243 @@ export default function PatientPage() {
       )}
 
       {/* Secondary Actions Row */}
-      <div className="flex gap-6 mt-16 w-full max-w-2xl justify-center">
-        <button 
+      <div className="secondary-actions grid grid-cols-3 gap-2 sm:gap-3 mt-4 w-full max-w-md sm:max-w-2xl">
+        <button
+          onClick={openAbout}
+          className="bg-zinc-800 hover:bg-zinc-700 rounded-2xl py-4 px-1 text-base sm:text-xl font-medium leading-tight text-center transition-transform active:scale-95 border border-zinc-700 min-h-[5rem] flex items-center justify-center"
+        >
+          👤 About Me
+        </button>
+        <button
           onClick={handleIdentify}
-          className="flex-1 bg-zinc-800 hover:bg-zinc-700 rounded-3xl py-8 text-2xl md:text-3xl font-medium transition-transform active:scale-95 border border-zinc-700"
+          className="bg-zinc-800 hover:bg-zinc-700 rounded-2xl py-4 px-1 text-base sm:text-xl font-medium leading-tight text-center transition-transform active:scale-95 border border-zinc-700 min-h-[5rem] flex items-center justify-center"
         >
           {status === "camera" ? "👁️ Identify Face" : "📷 Who is this?"}
         </button>
         <button
           onClick={openMemories}
-          className="flex-1 bg-zinc-800 hover:bg-zinc-700 rounded-3xl py-8 text-2xl md:text-3xl font-medium transition-transform active:scale-95 border border-zinc-700"
+          className="bg-zinc-800 hover:bg-zinc-700 rounded-2xl py-4 px-1 text-base sm:text-xl font-medium leading-tight text-center transition-transform active:scale-95 border border-zinc-700 min-h-[5rem] flex items-center justify-center"
         >
           📖 Memories
         </button>
+        <button
+          onClick={openBriefing}
+          className="bg-zinc-800 hover:bg-zinc-700 rounded-2xl py-4 px-1 text-base sm:text-xl font-medium leading-tight text-center transition-transform active:scale-95 border border-zinc-700 min-h-[5rem] flex items-center justify-center"
+        >
+          🌅 Good Morning
+        </button>
+        <button
+          onClick={openMood}
+          className="bg-zinc-800 hover:bg-zinc-700 rounded-2xl py-4 px-1 text-base sm:text-xl font-medium leading-tight text-center transition-transform active:scale-95 border border-zinc-700 min-h-[5rem] flex items-center justify-center"
+        >
+          🙂 How I Feel
+        </button>
+        <button
+          onClick={openPhotoJournal}
+          className="bg-zinc-800 hover:bg-zinc-700 rounded-2xl py-4 px-1 text-base sm:text-xl font-medium leading-tight text-center transition-transform active:scale-95 border border-zinc-700 min-h-[5rem] flex items-center justify-center"
+        >
+          📷 Photo Journal
+        </button>
       </div>
+
+      {/* Photo Journal overlay — pictures with captions, tap to hear */}
+      {photoJournalOpen && (
+        <div className="absolute inset-0 z-20 bg-black/95 flex flex-col p-6 overflow-y-auto">
+          <div className="flex items-center justify-between mb-8 max-w-3xl mx-auto w-full">
+            <h2 className="text-3xl md:text-4xl font-medium text-zinc-200">Photo Journal</h2>
+            <button
+              onClick={() => setPhotoJournalOpen(false)}
+              className="text-zinc-200 bg-zinc-800 hover:bg-zinc-700 rounded-full px-6 py-3 text-xl"
+            >
+              Close
+            </button>
+          </div>
+          <div className="max-w-3xl mx-auto w-full">
+            {photoJournal.length === 0 ? (
+              <p className="text-zinc-400 text-center text-xl mt-12">
+                No photo memories yet. Ask your family to add some.
+              </p>
+            ) : (
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-5 pb-10">
+                {photoJournal.map((p) => (
+                  <button
+                    key={p.id}
+                    onClick={() => speakText(p.caption)}
+                    className="text-left bg-zinc-900 hover:bg-zinc-800 border border-zinc-700 rounded-2xl overflow-hidden transition-colors"
+                  >
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img
+                      src={`/api/memories/${p.id}/photo`}
+                      alt={p.caption}
+                      className="w-full h-56 object-cover"
+                    />
+                    <div className="p-5 text-2xl text-zinc-100 leading-relaxed">
+                      {p.caption}
+                      <span className="block text-zinc-500 text-base mt-2">🔊 Tap to hear this</span>
+                    </div>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Mood check-in overlay — tap how you feel */}
+      {moodOpen && (
+        <div className="absolute inset-0 z-30 bg-black/95 flex flex-col items-center justify-center p-8 text-center">
+          {!moodLogged ? (
+            <>
+              <h2 className="text-4xl md:text-5xl font-semibold text-white mb-12">
+                How are you feeling?
+              </h2>
+              <div className="flex flex-wrap gap-6 justify-center max-w-3xl">
+                {MOODS.map((m) => (
+                  <button
+                    key={m.key}
+                    onClick={() => logMood(m.key)}
+                    className="flex flex-col items-center gap-2 bg-zinc-800 hover:bg-zinc-700 rounded-3xl px-8 py-6 active:scale-95 transition-transform border border-zinc-700"
+                  >
+                    <span className="text-6xl">{m.emoji}</span>
+                    <span className="text-2xl font-medium">{m.label}</span>
+                  </button>
+                ))}
+              </div>
+              <button
+                onClick={() => setMoodOpen(false)}
+                className="mt-12 text-xl text-zinc-400 hover:text-white"
+              >
+                Close
+              </button>
+            </>
+          ) : (
+            <>
+              <div className="text-8xl mb-6">💚</div>
+              <h2 className="text-4xl md:text-5xl font-semibold text-white mb-12 max-w-2xl">
+                Thank you for sharing.
+              </h2>
+              <button
+                onClick={() => setMoodOpen(false)}
+                className="bg-emerald-600 hover:bg-emerald-500 text-white text-3xl font-bold rounded-full px-16 py-8 shadow-2xl active:scale-95 transition-transform"
+              >
+                ✓ Done
+              </button>
+            </>
+          )}
+        </div>
+      )}
+
+      {/* Daily Briefing overlay — a warm summary of today */}
+      {briefingOpen && (
+        <div className="absolute inset-0 z-20 bg-black/95 flex flex-col p-6 overflow-y-auto">
+          <div className="flex items-center justify-between mb-8 max-w-2xl mx-auto w-full">
+            <h2 className="text-3xl md:text-4xl font-medium text-zinc-200">Your Daily Briefing</h2>
+            <button
+              onClick={() => setBriefingOpen(false)}
+              className="text-zinc-200 bg-zinc-800 hover:bg-zinc-700 rounded-full px-6 py-3 text-xl"
+            >
+              Close
+            </button>
+          </div>
+          <div className="max-w-2xl mx-auto w-full space-y-8 pb-10">
+            <p className="text-2xl md:text-3xl text-zinc-100 leading-relaxed whitespace-pre-line">
+              {briefing}
+            </p>
+            <button
+              onClick={() => speakText(briefing)}
+              className="w-full bg-emerald-700 hover:bg-emerald-600 rounded-2xl py-6 text-2xl font-medium text-white transition-colors"
+            >
+              🔊 Read it again
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* About Me overlay — who you are */}
+      {aboutOpen && (
+        <div className="absolute inset-0 z-20 bg-black/95 flex flex-col p-6 overflow-y-auto">
+          <div className="flex items-center justify-between mb-6 max-w-2xl mx-auto w-full">
+            <h2 className="text-3xl md:text-4xl font-medium text-zinc-200">About You</h2>
+            <button
+              onClick={() => setAboutOpen(false)}
+              className="text-zinc-200 bg-zinc-800 hover:bg-zinc-700 rounded-full px-6 py-3 text-xl"
+            >
+              Close
+            </button>
+          </div>
+          <div className="max-w-2xl mx-auto w-full space-y-8 pb-10">
+            <div className="text-center">
+              {profile.photo && (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img
+                  src={profile.photo}
+                  alt="You"
+                  className="w-44 h-44 rounded-full object-cover mx-auto border-4 border-zinc-700 mb-5"
+                />
+              )}
+              <p className="text-zinc-400 text-xl">This is you</p>
+              <h3 className="text-5xl md:text-6xl font-semibold text-white mt-1">
+                {profile.name || "You"}
+              </h3>
+              {profile.tagline && (
+                <p className="text-2xl text-zinc-300 mt-3">{profile.tagline}</p>
+              )}
+            </div>
+
+            {aboutGeneral.length > 0 && (
+              <div className="space-y-3">
+                <h4 className="text-2xl font-semibold text-amber-300">A little about you</h4>
+                {aboutGeneral.map((m) => (
+                  <button
+                    key={m.id}
+                    onClick={() => speakText(m.text)}
+                    className="w-full text-left bg-zinc-900 hover:bg-zinc-800 border border-zinc-700 rounded-2xl p-6 text-2xl text-zinc-100 leading-relaxed transition-colors"
+                  >
+                    {m.text}
+                    <span className="block text-zinc-500 text-base mt-3">🔊 Tap to hear this</span>
+                  </button>
+                ))}
+              </div>
+            )}
+
+            {(profile.emergency_name || profile.emergency_phone) && (
+              <div className="space-y-3">
+                <h4 className="text-2xl font-semibold text-amber-300">If you need help</h4>
+                <a
+                  href={profile.emergency_phone ? `tel:${profile.emergency_phone}` : undefined}
+                  className="block bg-red-900/40 hover:bg-red-900/60 border border-red-700 rounded-2xl p-6 text-2xl text-zinc-100 transition-colors"
+                >
+                  📞 Call {profile.emergency_name || "your contact"}
+                  {profile.emergency_phone && (
+                    <span className="block text-zinc-300 text-xl mt-1">{profile.emergency_phone}</span>
+                  )}
+                </a>
+              </div>
+            )}
+
+            {aboutPeople.length > 0 && (
+              <div className="space-y-3">
+                <h4 className="text-2xl font-semibold text-amber-300">Your family</h4>
+                {aboutPeople.map((p) => (
+                  <button
+                    key={p.id}
+                    onClick={() => speakText(`This is ${p.name}, your ${p.relationship}.`)}
+                    className="w-full text-left flex items-center gap-4 bg-zinc-900 hover:bg-zinc-800 border border-zinc-700 rounded-2xl p-5 transition-colors"
+                  >
+                    <FamilyAvatar id={p.id} name={p.name} />
+                    <span>
+                      <span className="text-2xl text-zinc-100">
+                        {p.name} <span className="text-zinc-400">— your {p.relationship}</span>
+                      </span>
+                      <span className="block text-zinc-500 text-base mt-1">🔊 Tap to hear this</span>
+                    </span>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* Memories overlay — tap any memory to hear it read aloud */}
       {memoriesOpen && (

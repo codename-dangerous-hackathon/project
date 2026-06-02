@@ -1,38 +1,35 @@
-# Local API & Backend
+# Belong backend dependencies — local / on-device only (no cloud AI SDKs).
+# Only direct, actually-used deps are declared; transitive deps (tokenizers,
+# ctranslate2, scipy, tqdm, …) are pulled in by these automatically.
+
+# --- API & backend ---
 fastapi
 uvicorn
 pydantic
-chromadb
-python-multipart
+python-multipart        # FastAPI multipart parsing (the /transcribe upload)
+requests                # local vLLM (Nemotron) + Toronto Open Data calls
 
-# Data Science & RAPIDS (Install via Conda if possible for GPU support)
+# --- Memory / data ---
+chromadb                # vector store (semantic memory index)
+numpy                   # cosine similarity (consolidation), vision arrays
+
+# --- On-device vision (face enroll + "Who is this?") ---
+insightface             # RetinaFace detector + ArcFace embeddings (buffalo_l)
+onnxruntime             # runs the InsightFace + Chroma ONNX models locally
+opencv-python-headless  # image decoding for the vision pipeline
+pillow                  # image decode / thumbnail + EXIF rotation (photos.py, vision.py)
+
+# --- On-device speech (the voice loop) ---
+faster-whisper          # local STT (auto-detects the spoken language)
+piper-tts               # local TTS (one Piper voice per language)
+langdetect              # picks the TTS voice / detects the reply language (audio.py)
+
+# --- Web Push reminders ---
+pywebpush               # sends medication / appointment notifications (reminders.py)
+
+# --- Data scripts (scripts/fetch_toronto_data.py) ---
 pandas
-numpy
-matplotlib
-seaborn
-scikit-learn
 
-# NLP & NVIDIA Ecosystem
-transformers
-torch
-openai  # For NIMs (often OpenAI-compatible API)
-
-# On-device vision (face enrollment + "Who is this?" recognition)
-insightface           # RetinaFace detector + ArcFace embeddings (buffalo_l)
-onnxruntime           # Runs the InsightFace ONNX models locally
-opencv-python-headless # Image decoding for the vision pipeline
-
-# On-device speech (the voice companion loop)
-faster-whisper        # Local STT (patient speech -> text)
-piper-tts             # Local TTS (companion text -> warm voice)
-
-# LLM Frameworks (RAG)
-langchain
-langchain-nvidia-ai-endpoints
-llama-index
-
-# Utils
-requests
-python-dotenv
-tqdm
-jupyterlab
+# --- Tests ---
+pytest                  # backend test runner
+httpx                   # FastAPI TestClient HTTP backend

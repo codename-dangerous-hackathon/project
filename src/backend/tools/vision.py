@@ -1,5 +1,5 @@
 """
-On-device face recognition for Anchor.
+On-device face recognition for Belong.
 
 Uses InsightFace (buffalo_l: RetinaFace detector + ArcFace recognition) to turn
 a photo into a 512-d normalized face embedding. Everything runs locally on the
@@ -8,11 +8,13 @@ original photo), matching the privacy spec.
 """
 
 import base64
+import io
 import threading
 from typing import List, Optional
 
 import cv2
 import numpy as np
+from PIL import Image, ImageOps
 
 # Lazily-initialized singleton — loading the model takes a few seconds and a few
 # hundred MB, so we do it once on first use rather than at import time.
@@ -40,9 +42,21 @@ def warmup() -> None:
     _get_app()
 
 
+def warmed() -> bool:
+    """Whether the face model is loaded (for /health)."""
+    return _app is not None
+
+
 def _decode_image(image_bytes: bytes):
-    arr = np.frombuffer(image_bytes, dtype=np.uint8)
-    return cv2.imdecode(arr, cv2.IMREAD_COLOR)  # BGR, or None if not an image
+    # Decode via PIL so we honour the phone's EXIF rotation (a sideways face
+    # won't be detected otherwise), then convert to the BGR array OpenCV expects.
+    try:
+        img = Image.open(io.BytesIO(image_bytes))
+        img = ImageOps.exif_transpose(img).convert("RGB")
+        return cv2.cvtColor(np.array(img), cv2.COLOR_RGB2BGR)
+    except Exception:
+        arr = np.frombuffer(image_bytes, dtype=np.uint8)
+        return cv2.imdecode(arr, cv2.IMREAD_COLOR)  # fallback
 
 
 def extract_face_embedding(image_bytes: bytes) -> Optional[List[float]]:

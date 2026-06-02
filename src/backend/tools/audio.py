@@ -1,11 +1,11 @@
 """
-On-device speech for Anchor — fully offline.
+On-device speech for Belong — fully offline, multilingual.
 
-  STT: faster-whisper (CTranslate2)  — patient speech -> text
-  TTS: Piper (ONNX)                  — companion text  -> warm audio
+  STT: faster-whisper (multilingual) — auto-detects the spoken language.
+  TTS: Piper — one voice per language; we pick the voice from the text's
+       detected language so the companion speaks back in the same tongue.
 
-Both models are loaded once as lazy singletons (loading takes a few seconds, so
-we never want to do it per request).
+Models load lazily as singletons (per language for TTS).
 """
 
 import io
@@ -13,15 +13,26 @@ import os
 import threading
 import wave
 
+from langdetect import DetectorFactory, detect
+
+DetectorFactory.seed = 0  # make language detection deterministic
+
 _BASE = os.path.dirname(os.path.dirname(__file__))  # src/backend
-PIPER_VOICE_PATH = os.getenv(
-    "PIPER_VOICE", os.path.join(_BASE, "models", "piper", "en_US-amy-medium.onnx")
-)
-WHISPER_MODEL_NAME = os.getenv("WHISPER_MODEL", "base.en")
+_VOICE_DIR = os.path.join(_BASE, "models", "piper")
+# Multilingual model so we can auto-detect French/Spanish/etc. (NOT base.en).
+WHISPER_MODEL_NAME = os.getenv("WHISPER_MODEL", "base")
+
+# language code -> Piper voice file
+PIPER_VOICES = {
+    "en": "en_US-amy-medium.onnx",
+    "fr": "fr_FR-siwis-medium.onnx",
+    "es": "es_ES-davefx-medium.onnx",
+}
+DEFAULT_LANG = "en"
 
 _whisper = None
 _whisper_lock = threading.Lock()
-_piper = None
+_piper = {}                # lang -> PiperVoice
 _piper_lock = threading.Lock()
 
 
@@ -38,40 +49,51 @@ def _get_whisper():
     return _whisper
 
 
-def _get_piper():
-    global _piper
-    if _piper is None:
+def _get_piper(lang: str):
+    lang = lang if lang in PIPER_VOICES else DEFAULT_LANG
+    if lang not in _piper:
         with _piper_lock:
-            if _piper is None:
+            if lang not in _piper:
                 from piper import PiperVoice
 
-                _piper = PiperVoice.load(PIPER_VOICE_PATH)
-    return _piper
+                _piper[lang] = PiperVoice.load(os.path.join(_VOICE_DIR, PIPER_VOICES[lang]))
+    return _piper[lang]
 
 
 def warmup() -> None:
-    """Pre-load both models so the first user request isn't slow."""
+    """Pre-load the STT model and the default voice so the first turn is fast."""
     _get_whisper()
-    _get_piper()
+    _get_piper(DEFAULT_LANG)
+
+
+def warmed() -> bool:
+    """Whether the STT model is loaded (for /health)."""
+    return _whisper is not None
 
 
 def transcribe_audio_local(audio_bytes: bytes) -> str:
     """
-    Transcribe patient speech. Accepts any container faster-whisper/PyAV can
-    decode (webm/opus from the browser, wav, mp4, ...).
+    Transcribe patient speech in whatever language they spoke (auto-detected).
+    Keeps the original language (task='transcribe', not 'translate').
     """
     if not audio_bytes:
         return ""
     model = _get_whisper()
-    segments, _info = model.transcribe(
-        io.BytesIO(audio_bytes), beam_size=1, language="en"
-    )
+    segments, _info = model.transcribe(io.BytesIO(audio_bytes), beam_size=1)
     return " ".join(seg.text for seg in segments).strip()
 
 
+def _detect_lang(text: str) -> str:
+    try:
+        code = detect(text)
+        return code if code in PIPER_VOICES else DEFAULT_LANG
+    except Exception:
+        return DEFAULT_LANG
+
+
 def synthesize_speech_local(text: str) -> bytes:
-    """Convert companion text into a warm WAV using the local Piper voice."""
-    voice = _get_piper()
+    """Speak the text using the Piper voice matching its detected language."""
+    voice = _get_piper(_detect_lang(text or " "))
     buf = io.BytesIO()
     with wave.open(buf, "wb") as wf:
         voice.synthesize_wav(text or " ", wf)

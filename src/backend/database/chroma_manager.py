@@ -7,7 +7,7 @@ import os
 DB_DIR = os.path.join(os.path.dirname(__file__), "data")
 os.makedirs(DB_DIR, exist_ok=True)
 
-class AnchorVectorDB:
+class BelongVectorDB:
     def __init__(self):
         # We use a persistent client so data survives restarts (completely offline)
         self.client = chromadb.PersistentClient(path=DB_DIR)
@@ -189,4 +189,4 @@ class AnchorVectorDB:
         self.face_collection.delete(ids=[person_id])
 
 # Singleton instance to be used by agents and API
-vdb = AnchorVectorDB()
+vdb = BelongVectorDB()

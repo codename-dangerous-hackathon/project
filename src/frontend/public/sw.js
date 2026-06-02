@@ -1,13 +1,13 @@
-// Anchor service worker.
+// Belong service worker.
 // Goal: stay installable/offline-capable WITHOUT ever pinning stale app code.
 // Bump CACHE_NAME on any change here to force a clean re-cache.
-const CACHE_NAME = 'anchor-v3';
+const CACHE_NAME = 'belong-v4';
 
 // --- Web Push: medication / appointment / family reminders ---
 self.addEventListener('push', (event) => {
   let data = {};
   try { data = event.data ? event.data.json() : {}; } catch { /* noop */ }
-  const title = data.title || 'Anchor reminder';
+  const title = data.title || 'Belong reminder';
   event.waitUntil((async () => {
     await self.registration.showNotification(title, {
       body: data.body || '',
@@ -73,6 +73,14 @@ self.addEventListener('fetch', (event) => {
         }
       })()
     );
+    return;
+  }
+
+  // API data (family, calendar, events, journal, …) must ALWAYS be fresh —
+  // never serve it from cache, or the app shows stale data on the device.
+  const url = new URL(req.url);
+  if (url.pathname.startsWith('/api/')) {
+    event.respondWith(fetch(req));
     return;
   }
 

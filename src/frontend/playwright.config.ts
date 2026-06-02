@@ -3,7 +3,7 @@ import path from "path";
 
 const VOICE_WAV = path.resolve(__dirname, "e2e/fixtures/voice_sarah.wav");
 
-// E2E config for the Anchor app. Assumes the production server is already
+// E2E config for the Belong app. Assumes the production server is already
 // running on http://localhost:3000 (make build && make start) and the FastAPI
 // backend on 127.0.0.1:8001 (proxied via the Next.js /api rewrite).
 export default defineConfig({
