@@ -2,7 +2,8 @@
 
 **Belong** is a private, on-device AI companion for people living with dementia — and the caregivers who support them. It runs **100% locally on the NVIDIA Spark (GB10)**: no cloud, no data leaving the home. Voice, memory, faces, schedules, moods, photos, and city services all stay on the device.
 
-> Built for **The Spark Hack Series, presented by NVIDIA (Toronto)** — Public Services track, powered by **NVIDIA Nemotron** and **City of Toronto Open Data**.
+> Built for **The Spark Hack Series, presented by NVIDIA (Toronto)** — powered by **NVIDIA Nemotron** and **City of Toronto Open Data**.
+⭐ Winner of the Nvidia Hackathon Toronto May 2026 Public Services track ⭐
 
 ---
 
